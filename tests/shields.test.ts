@@ -21,8 +21,11 @@ test('shields catch destructive commands however they are written', async () => 
     // wrappers Shields doesn't list, and commands handed over as one string
     'caffeinate rm -rf x', 'stdbuf -oL rm -rf x', 'flock /tmp/lock rm -rf x', 'parallel rm -rf ::: a b',
     'ssh host rm -rf x', "ssh host 'git push -f'", 'watch "rm -rf x"', 'su -c "rm -rf x"', 'env -S "rm -rf x"',
-    // ANSI-C quoting, and a shell reading a here-document
-    "$'\\x72\\x6d' -rf x", "$'rm' -rf x", 'bash <<EOF\nrm -rf x\nEOF',
+    // ANSI-C quoting
+    "$'\\x72\\x6d' -rf x", "$'rm' -rf x",
+    // a here-document's body is judged whoever reads it: a wrapped shell, a pipe into one, or a file
+    'bash <<EOF\nrm -rf x\nEOF', 'sudo bash <<EOF\nrm -rf x\nEOF', 'cat <<EOF | bash\nrm -rf x\nEOF',
+    'cat <<EOF > notes.md\nrm -rf x\nEOF',
   ]
   for (const command of blocked) expect([command, hostileReason(command)]).toEqual([command, expect.any(String)])
 })
@@ -34,11 +37,10 @@ test('shields let ordinary commands through, even ones that mention danger', asy
     'git push origin main', 'git push -u origin feature', 'git reset HEAD~1', 'git reset --soft HEAD~1',
     'git clean -n', 'git checkout -b feature', 'git checkout main', 'git restore src/a.ts', 'git branch -d merged',
     'npm test 2>&1 | tail -5', 'find . -name "*.ts"', 'cat notes.md # rm -rf x', 'bash scripts/build.sh',
-    // a here-document is text unless a shell reads it; the command after it still counts
-    'cat <<EOF > notes.md\nrm -rf x\nEOF', "python3 - <<'EOF'\nprint('rm -rf x')\nEOF\necho done",
+    'cat <<EOF > notes.md\nhello\nEOF',
     'gh pr create --body "rm -rf is dangerous"', 'npm run build', 'node -e "console.log(1)"', 'ssh host ls',
   ]
-  // ...but what follows a here-document is still judged
+  // What follows a here-document is judged too
   expect(hostileReason('cat <<EOF > a.md\nhello\nEOF\ngit reset --hard')).toBe('git reset --hard')
   for (const command of allowed) expect([command, hostileReason(command)]).toEqual([command, undefined])
 })

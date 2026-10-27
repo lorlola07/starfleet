@@ -78,23 +78,8 @@ export function parse(command: string): Parsed {
       i = end < 0 ? command.length : end + 1
       continue
     }
-    // A here-document's body is text, not commands, unless a shell reads it (bash <<EOF): then it is nested
-    if (c === '<' && command[i + 1] === '<' && command[i + 2] !== '<') {
-      const head = /^<<-?\s*(['"]?)([A-Za-z0-9_]+)\1/.exec(command.slice(i))
-      if (head) {
-        endWord()
-        const lineEnd = command.indexOf('\n', i)
-        const close = new RegExp(`\\n\\t*${head[2]}[ \\t]*(\\n|$)`).exec(command.slice(lineEnd < 0 ? command.length : lineEnd))
-        const bodyStart = lineEnd < 0 ? command.length : lineEnd + 1
-        const bodyEnd = close ? lineEnd + close.index : command.length
-        if (SHELLS.has(nameOf(seg[0] ?? ''))) nested.push(command.slice(bodyStart, bodyEnd))
-        // The rest of the heredoc's own line still runs; the body is skipped
-        const rest = command.slice(i + head[0].length, lineEnd < 0 ? command.length : lineEnd)
-        const after = close ? bodyEnd + close[0].length : command.length
-        command = command.slice(0, i) + rest + '\n' + command.slice(after)
-        continue
-      }
-    }
+    // A here-document's body is read line by line like any other commands (fail closed): telling
+    // text from a body a shell will run is not something a seatbelt can do reliably
     if (c === '"') {
       add('')
       i++
