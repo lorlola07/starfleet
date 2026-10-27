@@ -17,7 +17,12 @@ test('shields catch destructive commands however they are written', async () => 
     'git push origin +main', 'git push origin :main', 'git push --delete origin x', 'git push --mirror',
     'git reset --hard', 'git reset -q --hard', 'git reset HEAD --hard', 'git clean -fdx', 'git clean --force',
     'git checkout -f main', 'git checkout -- .', 'git restore .', 'git branch -D old', 'git -c alias.p=push p -f',
-    'git -c "alias.nuke=!rm -rf x" nuke',
+    'git -c "alias.nuke=!rm -rf x" nuke', 'git -calias.p=push p -f',
+    // wrappers Shields doesn't list, and commands handed over as one string
+    'caffeinate rm -rf x', 'stdbuf -oL rm -rf x', 'flock /tmp/lock rm -rf x', 'parallel rm -rf ::: a b',
+    'ssh host rm -rf x', "ssh host 'git push -f'", 'watch "rm -rf x"', 'su -c "rm -rf x"', 'env -S "rm -rf x"',
+    // ANSI-C quoting, and a shell reading a here-document
+    "$'\\x72\\x6d' -rf x", "$'rm' -rf x", 'bash <<EOF\nrm -rf x\nEOF',
   ]
   for (const command of blocked) expect([command, hostileReason(command)]).toEqual([command, expect.any(String)])
 })
@@ -29,6 +34,11 @@ test('shields let ordinary commands through, even ones that mention danger', asy
     'git push origin main', 'git push -u origin feature', 'git reset HEAD~1', 'git reset --soft HEAD~1',
     'git clean -n', 'git checkout -b feature', 'git checkout main', 'git restore src/a.ts', 'git branch -d merged',
     'npm test 2>&1 | tail -5', 'find . -name "*.ts"', 'cat notes.md # rm -rf x', 'bash scripts/build.sh',
+    // a here-document is text unless a shell reads it; the command after it still counts
+    'cat <<EOF > notes.md\nrm -rf x\nEOF', "python3 - <<'EOF'\nprint('rm -rf x')\nEOF\necho done",
+    'gh pr create --body "rm -rf is dangerous"', 'npm run build', 'node -e "console.log(1)"', 'ssh host ls',
   ]
+  // ...but what follows a here-document is still judged
+  expect(hostileReason('cat <<EOF > a.md\nhello\nEOF\ngit reset --hard')).toBe('git reset --hard')
   for (const command of allowed) expect([command, hostileReason(command)]).toEqual([command, undefined])
 })

@@ -64,12 +64,36 @@ export function parse(command: string): Parsed {
     const sub = substitution(i)
     if (sub !== undefined) { i = sub; continue }
     if (c === '\\') { if (command[i + 1] !== '\n') add(command[i + 1] ?? ''); i += 2; continue }
-    if (c === "'" || (c === '$' && command[i + 1] === "'")) {
-      const open = c === '$' ? i + 1 : i
-      const end = command.indexOf("'", open + 1)
-      add(command.slice(open + 1, end < 0 ? undefined : end))
+    if (c === '$' && command[i + 1] === "'") {
+      // $'…' is ANSI-C quoting: $'\x72\x6d' is rm, and \' does not end it
+      let end = i + 2
+      while (end < command.length && command[end] !== "'") end += command[end] === '\\' ? 2 : 1
+      add(decodeAnsiC(command.slice(i + 2, end)))
+      i = end + 1
+      continue
+    }
+    if (c === "'") {
+      const end = command.indexOf("'", i + 1)
+      add(command.slice(i + 1, end < 0 ? undefined : end))
       i = end < 0 ? command.length : end + 1
       continue
+    }
+    // A here-document's body is text, not commands, unless a shell reads it (bash <<EOF): then it is nested
+    if (c === '<' && command[i + 1] === '<' && command[i + 2] !== '<') {
+      const head = /^<<-?\s*(['"]?)([A-Za-z0-9_]+)\1/.exec(command.slice(i))
+      if (head) {
+        endWord()
+        const lineEnd = command.indexOf('\n', i)
+        const close = new RegExp(`\\n\\t*${head[2]}[ \\t]*(\\n|$)`).exec(command.slice(lineEnd < 0 ? command.length : lineEnd))
+        const bodyStart = lineEnd < 0 ? command.length : lineEnd + 1
+        const bodyEnd = close ? lineEnd + close.index : command.length
+        if (SHELLS.has(nameOf(seg[0] ?? ''))) nested.push(command.slice(bodyStart, bodyEnd))
+        // The rest of the heredoc's own line still runs; the body is skipped
+        const rest = command.slice(i + head[0].length, lineEnd < 0 ? command.length : lineEnd)
+        const after = close ? bodyEnd + close[0].length : command.length
+        command = command.slice(0, i) + rest + '\n' + command.slice(after)
+        continue
+      }
     }
     if (c === '"') {
       add('')
@@ -92,6 +116,16 @@ export function parse(command: string): Parsed {
   }
   endSeg()
   return { segments, nested }
+}
+
+const ESCAPES: Record<string, string> = { n: '\n', t: '\t', r: '\r', a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', v: '\v' }
+function decodeAnsiC(body: string): string {
+  return body.replace(/\\(x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|U[0-9a-fA-F]{1,8}|[0-7]{1,3}|c.|.)/g, (_, esc: string) => {
+    if (/^[xuU]/.test(esc)) return String.fromCodePoint(parseInt(esc.slice(1), 16))
+    if (/^[0-7]/.test(esc)) return String.fromCharCode(parseInt(esc, 8))
+    if (esc[0] === 'c') return String.fromCharCode(esc.charCodeAt(1) & 31)
+    return ESCAPES[esc] ?? esc
+  })
 }
 
 // The reason Tactical refuses the command, or undefined when it may run
@@ -128,7 +162,20 @@ const WRAPPERS: Record<string, string[]> = {
   timeout: ['-s', '-k'],
   xargs: ['-n', '-I', '-L', '-P', '-d', '-s', '-E', '-a'],
   watch: ['-n', '-d'],
+  caffeinate: ['-t', '-w'],
+  stdbuf: ['-i', '-o', '-e'],
+  ionice: ['-c', '-n', '-p'],
+  chronic: [],
+  unbuffer: [],
+  strace: ['-e', '-o', '-p', '-s', '-u'],
+  ltrace: ['-e', '-o', '-p', '-s', '-u'],
+  gtimeout: ['-s', '-k'],
 }
+// Commands that run a command given as a string after -c
+const RUNS_STRING = new Set(['su', 'runuser', 'script'])
+// Commands whose arguments are only text: a word like rm among them is never run
+const TEXT_ONLY = new Set(['echo', 'printf', 'grep', 'egrep', 'fgrep', 'rg', 'ag', 'cat', 'less', 'more', 'head', 'tail', 'man', 'which', 'type', 'whatis', 'apropos', 'tldr', 'gh', 'jq', 'sed', 'awk', 'wc', 'sort', 'uniq', 'tr', 'cut', 'diff', 'test', '['])
+const JUDGED = new Set(['rm', 'find', 'git'])
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish'])
 
 function nameOf(word: string): string {
@@ -142,15 +189,22 @@ function judge(input: string[], depth: number): string | undefined {
     while (words.length && ASSIGNMENT.test(words[0]!)) words = words.slice(1)
     const wrapper = WRAPPERS[nameOf(words[0] ?? '')]
     if (!wrapper) break
-    const isTimeout = nameOf(words[0]!) === 'timeout'
+    const which = nameOf(words[0]!)
     let at = 1
-    while (at < words.length && (words[at]!.startsWith('-') || (nameOf(words[0]!) === 'env' && ASSIGNMENT.test(words[at]!)))) {
+    while (at < words.length && (words[at]!.startsWith('-') || (which === 'env' && ASSIGNMENT.test(words[at]!)))) {
+      // env -S splits its value into a command line of its own
+      if (which === 'env' && words[at]!.startsWith('-S')) {
+        const line = words[at] === '-S' ? words.slice(at + 1).join(' ') : `${words[at]!.slice(2)} ${words.slice(at + 1).join(' ')}`
+        return hostileReason(line, depth + 1)
+      }
       at += wrapper.includes(words[at]!) ? 2 : 1
     }
-    if (isTimeout) at += 1 // the duration
+    if (which === 'timeout' || which === 'gtimeout') at += 1 // the duration
     words = words.slice(at)
   }
   if (!words.length) return undefined
+  // A whole command handed over as one word (watch "…") is read as a command line
+  if (/\s/.test(words[0]!)) return hostileReason(words.join(' '), depth + 1)
   const name = nameOf(words[0]!)
   const args = words.slice(1)
 
@@ -164,6 +218,22 @@ function judge(input: string[], depth: number): string | undefined {
   if (name === 'git') return gitReason(args, depth)
   // A command named by a variable ($x -rf ~) could be anything: judge its flags as rm's
   if (name.includes('$')) return rmReason(args)
+  if (RUNS_STRING.has(name)) {
+    const c = args.findIndex(a => a === '-c' || a === '--command')
+    if (c >= 0 && args[c + 1] !== undefined) return hostileReason(args[c + 1]!, depth + 1)
+  }
+  // Fail closed for a command Shields doesn't know (flock, parallel, ssh host …): an rm, find or git
+  // among its words, or a word that is a whole such command line, is judged from there
+  if (!TEXT_ONLY.has(name)) {
+    for (let j = 0; j < args.length; j++) {
+      const word = args[j]!
+      if (JUDGED.has(nameOf(word))) return judge(args.slice(j), depth)
+      if (/\s/.test(word) && JUDGED.has(nameOf(word.trim().split(/\s+/)[0]!))) {
+        const reason = hostileReason(word, depth + 1)
+        if (reason) return reason
+      }
+    }
+  }
   return undefined
 }
 
@@ -205,6 +275,7 @@ function gitReason(args: string[], depth: number): string | undefined {
   while (at < args.length && args[at]!.startsWith('-')) {
     const opt = args[at]!
     if (opt === '-c' && /^alias\./i.test(args[at + 1] ?? '')) alias = args[at + 1]
+    if (/^-calias\./i.test(opt)) alias = opt.slice(2)
     at += GIT_VALUED.has(opt) ? 2 : 1
   }
   let sub = args[at]
