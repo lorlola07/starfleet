@@ -26,6 +26,8 @@ test('shields catch destructive commands however they are written', async () => 
     // a here-document's body is judged whoever reads it: a wrapped shell, a pipe into one, or a file
     'bash <<EOF\nrm -rf x\nEOF', 'sudo bash <<EOF\nrm -rf x\nEOF', 'cat <<EOF | bash\nrm -rf x\nEOF',
     'cat <<EOF > notes.md\nrm -rf x\nEOF',
+    // a stray quote in a here-document's body can't hide the command after its closing line
+    "cat <<EOF\n'\nEOF\nrm -rf x\n'", 'cat <<EOF\n"\nEOF\ngit reset --hard\n"',
   ]
   for (const command of blocked) expect([command, hostileReason(command)]).toEqual([command, expect.any(String)])
 })
@@ -37,7 +39,7 @@ test('shields let ordinary commands through, even ones that mention danger', asy
     'git push origin main', 'git push -u origin feature', 'git reset HEAD~1', 'git reset --soft HEAD~1',
     'git clean -n', 'git checkout -b feature', 'git checkout main', 'git restore src/a.ts', 'git branch -d merged',
     'npm test 2>&1 | tail -5', 'find . -name "*.ts"', 'cat notes.md # rm -rf x', 'bash scripts/build.sh',
-    'cat <<EOF > notes.md\nhello\nEOF',
+    'cat <<EOF > notes.md\nhello\nEOF', 'npm run build\nnpm test', 'git commit -m "Fix the band\n\nIt now shows other plugins"',
     'gh pr create --body "rm -rf is dangerous"', 'npm run build', 'node -e "console.log(1)"', 'ssh host ls',
   ]
   // What follows a here-document is judged too

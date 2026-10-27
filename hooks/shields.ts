@@ -125,6 +125,14 @@ export function hostileReason(command: string, depth = 0): string | undefined {
     const reason = hostileReason(inner, depth + 1)
     if (reason) return reason
   }
+  // Each line on its own too, so a quote opened in a here-document's body (or any stray quote)
+  // can't hide the lines after it: fail closed, at the cost of judging a multi-line string's lines
+  if (command.includes('\n')) {
+    for (const line of command.split('\n')) {
+      const reason = line.trim() ? hostileReason(line, depth + 1) : undefined
+      if (reason) return reason
+    }
+  }
   return undefined
 }
 
