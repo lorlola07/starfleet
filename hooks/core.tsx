@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, On } from 'claude-code'
+import type { EngineInterface, On, RenderElement } from 'claude-code'
 
 import { addLogEntry, bumpMission } from './log'
 import { redAlertSvg, setRedAlert } from './ops'
@@ -218,10 +218,15 @@ export function registerCore(on: On) {
   })
 
   // The band above the prompt: the ship glides while Claude works; between turns it shows
-  // red alert or the Borg, and nothing otherwise
+  // red alert or the Borg, and nothing otherwise. Other plugins' bands and the engine's own
+  // always show beneath it
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const el = $.ui.resolve(e)
+    const beside = async (mine: RenderElement) => {
+      const theirs = await next(e)
+      return theirs ? <Box flexDirection="column">{mine}{theirs}</Box> : mine
+    }
     const { Box, Text, Button } = el
     const alert = await read($, redAlert)
     const percent = await read($, assimilation)
@@ -230,12 +235,12 @@ export function registerCore(on: On) {
 
     if (e.props.isWorking) {
       const tint = alert.isOn ? 'red' : tier >= 2 ? 'borg' : 'none'
-      return 'Svg' in el
+      return beside('Svg' in el
         ? <el.Svg source={glideSvg(width, tint)} alt="An 8-bit starship gliding through stars" width={width} height={40} isInteractive />
-        : <Text color={LCARS.violet}>{'  ·   ✦      ·  >=<   ·    ✦  '}</Text>
+        : <Text color={LCARS.violet}>{'  ·   ✦      ·  >=<   ·    ✦  '}</Text>)
     }
     if (alert.isOn) {
-      return (
+      return beside(
         <Box flexDirection="row" columnGap={1} alignItems="center">
           <Text backgroundColor={LCARS.red} color={LCARS.ink} bold> RED ALERT </Text>
           <Text color={LCARS.red}>{alert.reason}</Text>
@@ -244,7 +249,7 @@ export function registerCore(on: On) {
       )
     }
     if (tier >= 1) {
-      return (
+      return beside(
         <Box flexDirection="row" columnGap={1} alignItems="center" flexWrap="wrap">
           <Text backgroundColor={LCARS.green} color={LCARS.ink} bold> ASSIMILATION {percent}% </Text>
           <Text color="success">{TIER_TEXT[tier]}</Text>

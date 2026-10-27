@@ -1,6 +1,6 @@
 {
   "name": "starfleet",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Star Trek tour of mod powers: shield guard, a sensor tool Claude can call, Make it so, captain mode, warp band, away-team alerts and a service record",
   "author": { "name": "Lauren" },
   "license": "MIT",

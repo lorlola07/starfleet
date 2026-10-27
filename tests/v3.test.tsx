@@ -45,6 +45,11 @@ function engine(on: any, run?: (_: unknown, e: { argv: string[] }) => unknown, l
   on('process.run', run ?? (() => ({ value: { exitCode: 0, stdout: ' M hooks/core.tsx\n', stderr: '' } })))
   on('session.start', (_: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
   on('command.run', () => ({}))
+  // What the engine and other plugins draw beneath starfleet
+  on('ui.render', ($: { ui: { resolve: (e: unknown) => { Text: unknown } } }, e: unknown) => {
+    const { Text } = $.ui.resolve(e) as { Text: any }
+    return <Text>other plugin band</Text>
+  })
   on('ui.toast', () => ({ value: undefined }))
   on('ui.status', () => ({ value: undefined }))
   on('clock.now', () => ({ value: Date.now() }))
@@ -80,9 +85,12 @@ test('warp core, log, crew and band draw on desktop and terminal', async ($, on)
 
     const idle = await $.ui.mount(band(surface, false))
     expect((await idle.find({ type: 'Text', text: /ASSIMILATION/ }))?.text).toContain('75%')
+    // Starfleet's band never hides what other plugins and the engine draw there
+    expect(await idle.find({ type: 'Text', text: /other plugin band/ })).toBeTruthy()
     await idle.unmount()
 
     const busy = await $.ui.mount(band(surface, true))
+    expect(await busy.find({ type: 'Text', text: /other plugin band/ })).toBeTruthy()
     await busy.unmount()
   }
 })
@@ -496,4 +504,27 @@ test('make it so approves only the proposed step, in words the captain can see',
   await complete({ durationMs: 1000, answer: 'Shall I delete the old branches and force-push?', isAborted: false })
   await new Promise(done => setTimeout(done, 20))
   expect(suggested).toEqual(['make it so'])
+})
+
+test('with AI summaries off, nothing is sent to a model for titles or briefings', async ($, on) => {
+  const store = engine(on)
+  const asked: string[] = []
+  on('model.complete', (_: unknown, e: { prompt: string }) => { asked.push(e.prompt); return { value: { isAnswered: true, text: 'Fix the crash', usage: { input_tokens: 1, output_tokens: 1 } } as never } })
+  on('prompt.submit', (_: unknown, e: { text: string }) => ({ text: e.text }))
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const run = $.command.run as (input: { command: string; args: string }) => Promise<{ text?: string }>
+  expect((await run({ command: 'ai-summaries', args: '' })).text).toContain('AI summaries on')
+  expect((await run({ command: 'ai-summaries', args: 'off' })).text).toContain('AI summaries off')
+  expect(store.aiSummaries).toBe(false)
+
+  const long = 'Please look into why the warp core crashes on startup when the config file is missing'
+  await ($.prompt.submit as (e: { text: string }) => Promise<unknown>)({ text: long })
+  await run({ command: 'log', args: 'remember the dilithium' })
+  const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
+  await ui.press({ key: 'brief' })
+  await new Promise(done => setTimeout(done, 20))
+  await ui.unmount()
+  expect(asked).toEqual([])
+  // The title comes from the prompt's own first line instead
+  expect((store['lastPrompt:' + sessionId] as { summary?: string }).summary).toContain('Please look into why the warp core')
 })

@@ -5,6 +5,7 @@ import { buildBriefing, currentBriefing, dismissBriefing } from './briefing'
 import { TIER_TEXT, coreFlags, coreSvg, ejectCore, tierOf } from './core'
 import { DECKS, DECK_H, crewNow, crewSvg, scanCrew } from './crew'
 import { LOG_FILES, addLogEntry, crewSyncPrompt, filed, readLog, saveMarkdown, sendClosure, syncPrompt } from './log'
+import { isAiOn, setAi } from './prefs'
 import { redAlertSvg, toggleRedAlert } from './ops'
 import { RANKS, basename, pipsSvg, rankOf, stardate } from './shared'
 import { COURSE, courseOf, duration, readVoyage, updateVoyage } from './voyage'
@@ -92,6 +93,7 @@ function meter(percent: number, width = 10): string {
 }
 
 export async function consoleSessionStart($: EngineInterface) {
+  await $.command.register({ name: 'ai-summaries', description: 'Starfleet AI summaries: /ai-summaries off stops sending prompts and log notes to Haiku for titles and briefings; on turns them back on', immediate: true, argumentHint: 'on | off' })
   await $.command.register({ name: 'starfleet', description: 'Open the Starfleet console: viewscreen, briefing, crew decks, captain’s log, main engineering, service record. /starfleet focus shows only the comms badge', immediate: true })
   // Open the console unasked, without focus; narrow terminals hold it until /starfleet.
   // The crew scan runs behind it; the briefing (a model call) waits until asked for
@@ -116,9 +118,10 @@ export async function rememberOrder($: EngineInterface, e: { text: string; comma
   // A short one-line ask stands as its own summary; anything longer is summed up by a model
   const isShort = text.length <= 48 && !text.includes('\n') && !text.includes('`')
   // Only the start is kept: the pane shows a line of it, and a pasted log must not fill the store
-  await $.store.set(key, { text: text.slice(0, 2000), at: await $.clock.now(), summary: isShort ? text : undefined } satisfies LastOrder)
+  const ai = isShort || (await isAiOn($))
+  await $.store.set(key, { text: text.slice(0, 2000), at: await $.clock.now(), summary: isShort ? text : ai ? undefined : gist(text) } satisfies LastOrder)
   $.ui.invalidate('ui.render')
-  if (!isShort) void summarizeOrder($, key, text).catch(() => {})
+  if (!isShort && (await isAiOn($))) void summarizeOrder($, key, text).catch(() => {})
 }
 
 const ORDER_SYSTEM = `Turn the user's request into a punchy starship order: imperative, 3 to 7 words, no period.
@@ -142,6 +145,17 @@ function gist(text: string): string {
 }
 
 export function registerConsole(on: On) {
+  on('command.run', { command: 'ai-summaries' }, async ($, e) => {
+    const arg = e.args.trim().toLowerCase()
+    if (arg === 'on' || arg === 'off') await setAi($, arg === 'on')
+    else if (arg) return { text: 'Use /ai-summaries on or /ai-summaries off.' }
+    return {
+      text: (await isAiOn($))
+        ? 'AI summaries on: long prompts get a short title, and the mission briefing is written from your notes, by Haiku. /ai-summaries off stops it.'
+        : 'AI summaries off: nothing is sent to a model for titles or briefings. /ai-summaries on turns them back on.',
+    }
+  })
+
   on('command.run', { command: 'starfleet' }, async ($, e) => {
     await loadPrefs($)
     if (e.args.trim() === 'focus') {

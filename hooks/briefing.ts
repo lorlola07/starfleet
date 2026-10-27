@@ -1,6 +1,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { readRecentLogs } from './log'
+import { isAiOn } from './prefs'
 import { basename } from './shared'
 
 // The mission briefing: where this project left off, built once per session from the newest
@@ -65,10 +66,12 @@ async function composeBriefing($: EngineInterface) {
     handoff ? `HANDOFF (${handoff.name}):\n${handoff.text}` : '',
     log.length ? `LOG ENTRIES:\n${log.map(e => `${e.stardate}: ${e.text}`).join('\n')}` : '',
   ].filter(Boolean).join('\n\n')
-  const reply = await $.model.complete({ model: 'haiku', system: SYSTEM, prompt: notes, maxTokens: 200 })
-  const lines = reply.isAnswered
-    ? reply.text.trim().split('\n').map(l => l.trim()).filter(Boolean).slice(0, 3)
-    : log.slice(0, 3).map(e => `${e.stardate}: ${e.text}`)
+  // With AI summaries off, the briefing is the log as written and nothing leaves for a model
+  const reply = (await isAiOn($)) ? await $.model.complete({ model: 'haiku', system: SYSTEM, prompt: notes, maxTokens: 200 }) : { isAnswered: false as const, text: '' }
+  const asWritten = log.length
+    ? log.slice(0, 3).map(e => `${e.stardate}: ${e.text}`)
+    : (handoff?.text ?? '').split('\n').map(l => l.trim()).filter(Boolean).slice(0, 3)
+  const lines = reply.isAnswered ? reply.text.trim().split('\n').map(l => l.trim()).filter(Boolean).slice(0, 3) : asWritten
   briefing = { status: 'ready', lines, source: handoff ? handoff.name : 'captain’s log' }
   $.ui.invalidate('ui.render')
 }

@@ -13,6 +13,14 @@ A Star Trek themed mod for Claude Code. It turns each session into a starship mi
 
 Other commands: `/bridge`, `/red-alert`, `/translator`, `/captain-mode`, `/service-record`, `/starship`, `/warp-core`.
 
+## Privacy
+
+- **AI summaries (on by default):** starfleet sends text to Claude Haiku, through your own Claude Code account, for two things. A prompt over 48 characters (its first 6,000 characters) is sent to get a short title for the console's "Last order". When you press Mission briefing, your recent log notes and newest handoff document are sent to write the briefing. Run `/ai-summaries off` to stop both: titles then come from the prompt's first line, and the briefing shows your notes as written. `/ai-summaries on` turns them back on.
+- **Translator:** `/translator` sends the text you give it to Haiku, only when you use it.
+- **Hub sync:** Sync, Close mission and Rescan + sync crew ask Claude to write your log, crew (project names and statuses), and mission records (including project paths and the files changed) to your own hub page. Nothing is synced unless you press one of them.
+- **Crew scan:** to place crew on their decks, starfleet runs `git status` in your recent project folders, and `gh` for any cloud repos you pick.
+- Everything else stays in Claude Code's local plugin storage on your computer.
+
 ## Install
 
 At the prompt of a Claude Code terminal session:
