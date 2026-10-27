@@ -1,6 +1,10 @@
 // Pure helpers and art shared by the starfleet modules. Nothing here touches $.
 
-export const HUB_URL = 'https://claude.ai/artifact/DEfgEw3CPVdsegWfd6NrRr'
+// Each captain publishes their own Starfleet Command hub from assets/hub.html; its link is kept in $.store
+export const HUB_TEMPLATE = 'assets/hub.html'
+export function isHubUrl(url: string): boolean {
+  return /^https:\/\/claude\.ai\/(code\/)?artifact\/[A-Za-z0-9-]+\/?$/.test(url)
+}
 
 // The actual local date and time, written as a stardate: 2026.1025.2332 is 25 Oct 2026, 23:32
 export function stardate(ms: number): string {

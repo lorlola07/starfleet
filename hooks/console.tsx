@@ -115,7 +115,8 @@ export async function rememberOrder($: EngineInterface, e: { text: string; comma
   const key = await lastOrderKey($)
   // A short one-line ask stands as its own summary; anything longer is summed up by a model
   const isShort = text.length <= 48 && !text.includes('\n') && !text.includes('`')
-  await $.store.set(key, { text, at: await $.clock.now(), summary: isShort ? text : undefined } satisfies LastOrder)
+  // Only the start is kept: the pane shows a line of it, and a pasted log must not fill the store
+  await $.store.set(key, { text: text.slice(0, 2000), at: await $.clock.now(), summary: isShort ? text : undefined } satisfies LastOrder)
   $.ui.invalidate('ui.render')
   if (!isShort) void summarizeOrder($, key, text).catch(() => {})
 }
@@ -328,7 +329,7 @@ export function registerConsole(on: On) {
         <Button key="rescan" label="Rescan + sync crew" hotkey="n" plain onPress={() => pressed($, async () => {
           await scanCrew($)
           $.ui.invalidate('ui.render')
-          void $.prompt.submit({ text: crewSyncPrompt() }).catch(() => {})
+          void $.prompt.submit({ text: await crewSyncPrompt($) }).catch(() => {})
           $.ui.toast('📡 Crew rescanned. Sending the roster to Starfleet Command…')
         })} />
       </Box>
@@ -370,7 +371,7 @@ export function registerConsole(on: On) {
         </Box>
         <Box flexDirection="row">
           <Box width="34%"><Button key="sync" label="📡 Sync" hotkey="s" plain onPress={() => pressed($, () => {
-            void $.prompt.submit({ text: syncPrompt() }).catch(() => {})
+            void syncPrompt($).then(text => $.prompt.submit({ text })).catch(() => {})
             $.ui.toast('📡 Transmitting records to Starfleet Command…')
           })} /></Box>
           <Box width="33%"><Button key="md" label="💾 Save" hotkey="d" plain onPress={() => pressed($, () => saveMarkdown($))} /></Box>

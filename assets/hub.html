@@ -1,0 +1,902 @@
+<title>Starfleet Command</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Antonio:wght@400;600;700&family=Barlow+Semi+Condensed:wght@400;500&family=Space+Mono&display=swap">
+<style>
+/* LCARS console: one committed dark look, an elbow frame down the left, colored blocks as section headers */
+:root {
+  color-scheme: dark;
+  --space: #07070c;
+  --panel: #12121c;
+  --panel2: #1a1a28;
+  --line: #2a2a3d;
+  --fg: #f1ece4;
+  --muted: #a49fb5;
+  --orange: #ff9c4b;
+  --peach: #ffcc99;
+  --lilac: #c9a0dc;
+  --blue: #9aa9ff;
+  --red: #ff5555;
+  --green: #8fd694;
+  --display: "Antonio", "Arial Narrow", sans-serif;
+  --body: "Barlow Semi Condensed", "Helvetica Neue", Arial, sans-serif;
+  --mono: "Space Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+body { background: var(--space); color: var(--fg); font-family: var(--body); font-size: 16px; line-height: 1.5; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 24px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 0 16px; }
+.elbow { background: var(--orange); border-radius: 40px 0 0 40px; display: flex; flex-direction: column; gap: 6px; padding: 72px 0 24px; }
+.elbow span { background: var(--space); height: 6px; }
+.elbow a { display: block; font-family: var(--display); color: var(--space); font-size: 13px; letter-spacing: .08em; text-align: right; padding: 4px 10px; text-decoration: none; min-height: 28px; }
+.elbow a:hover { filter: brightness(1.15); text-decoration: underline; }
+.elbow a:focus-visible { outline: 2px solid var(--fg); outline-offset: -2px; }
+html { scroll-behavior: smooth; } @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+[id^="h-"] { scroll-margin-top: 16px; }
+.elbow .b1 { background: var(--lilac); } .elbow .b2 { background: var(--blue); } .elbow .b3 { background: var(--peach); }
+header { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; border-top: 18px solid var(--orange); border-top-left-radius: 0; padding-top: 14px; }
+h1 { font-family: var(--display); font-weight: 700; font-size: clamp(36px, 7vw, 64px); line-height: .95; margin: 0; letter-spacing: .02em; text-transform: uppercase; text-wrap: balance; }
+.stardate { font-family: var(--mono); color: var(--peach); font-size: 14px; margin-left: auto; }
+.sub { color: var(--muted); margin: 6px 0 24px; max-width: 62ch; }
+.sub code { font-family: var(--mono); color: var(--peach); }
+section { margin-top: 28px; }
+.tag { display: inline-flex; align-items: center; gap: 10px; font-family: var(--display); font-size: 20px; letter-spacing: .06em; text-transform: uppercase; color: var(--space); background: var(--lilac); padding: 2px 18px 2px 14px; border-radius: 0 20px 20px 0; margin: 0; }
+.tag.log { background: var(--peach); } .tag.crew { background: var(--blue); } .tag.mis { background: var(--orange); }
+.count { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-left: 10px; }
+.list { margin-top: 12px; display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.row { background: var(--panel); padding: 10px 14px; display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 12px; align-items: baseline; }
+.row .sd { font-family: var(--mono); font-size: 13px; color: var(--peach); font-variant-numeric: tabular-nums; }
+.row .txt { min-width: 0; overflow-wrap: anywhere; }
+.row .proj { font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
+.crew { margin-top: 12px; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 12px; display: grid; gap: 6px; justify-items: start; }
+.card svg { image-rendering: pixelated; }
+.card .nm { font-family: var(--display); font-size: 18px; letter-spacing: .04em; text-transform: uppercase; }
+.card .pj { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.deck { font-family: var(--display); font-size: 13px; letter-spacing: .06em; text-transform: uppercase; padding: 1px 10px; border-radius: 10px; color: var(--space); }
+.d-bridge { background: var(--orange); } .d-engineering { background: var(--blue); } .d-sickbay { background: var(--red); } .d-quarters { background: var(--muted); }
+.mis .row { grid-template-columns: 124px minmax(0, 1fr) auto; }
+.pill { font-family: var(--mono); font-size: 12px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.pill.red { border-color: var(--red); color: var(--red); } .pill.ho { border-color: var(--lilac); color: var(--lilac); }
+.empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 4px; padding: 16px; color: var(--muted); margin-top: 12px; }
+.empty code { font-family: var(--mono); color: var(--peach); }
+.off { color: var(--muted); font-family: var(--mono); font-size: 12px; margin-top: 32px; }
+
+/* Notebook: project tree on the left, the open page on the right */
+.nb-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.nb-tools { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+.btn { font-family: var(--display); font-size: 14px; letter-spacing: .06em; text-transform: uppercase; color: var(--space); background: var(--blue); border: 0; border-radius: 14px; padding: 4px 14px; cursor: pointer; min-height: 30px; }
+.btn:hover { filter: brightness(1.1); }
+.btn:focus-visible, .tree button:focus-visible, .field:focus-visible { outline: 2px solid var(--peach); outline-offset: 2px; }
+.btn.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+.btn.ghost:hover { color: var(--fg); border-color: var(--muted); }
+.btn.warn { background: transparent; color: var(--red); border: 1px solid var(--red); }
+.btn.warn.armed { background: var(--red); color: var(--space); }
+.btn.p { background: var(--peach); } .btn.l { background: var(--lilac); } .btn.o { background: var(--orange); }
+.btn:disabled { opacity: .4; cursor: default; }
+.nb { margin-top: 12px; display: grid; grid-template-columns: 280px minmax(0, 1fr); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; min-height: 460px; background: var(--line); gap: 1px; }
+.tree { background: var(--panel); padding: 8px 0; overflow: auto; max-height: 70vh; }
+.tree ul { list-style: none; margin: 0; padding: 0; }
+.tree li > ul { padding-left: 14px; }
+.tree button { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 12px; cursor: pointer; color: var(--fg); min-height: 30px; overflow-wrap: anywhere; }
+.tree button:hover { background: var(--panel2); }
+.tree button[aria-current="true"] { background: var(--panel2); box-shadow: inset 3px 0 0 var(--orange); }
+.tree .tw { font-family: var(--mono); font-size: 11px; color: var(--muted); width: 10px; flex: none; }
+.tree .ic { width: 10px; height: 10px; flex: none; border-radius: 2px; }
+.tree .proj > button { font-family: var(--display); font-size: 16px; letter-spacing: .05em; text-transform: uppercase; color: var(--peach); margin-top: 4px; }
+.tree .proj > button .ic { background: var(--orange); border-radius: 5px 0 0 5px; width: 14px; }
+.tree .fold > button .ic { background: var(--lilac); }
+.tree .logf > button .ic { background: var(--peach); }
+.tree .note > button .ic { background: transparent; border: 1px solid var(--blue); }
+.tree .logn > button .ic { background: transparent; border: 1px solid var(--peach); border-radius: 5px; }
+.tree [draggable="true"] { cursor: grab; }
+.tree li.dragging > button { opacity: .4; }
+.tree button.drop-into { background: var(--panel2); outline: 1px dashed var(--lilac); outline-offset: -2px; }
+.tree button.drop-before { box-shadow: inset 0 2px 0 var(--peach); }
+.tree .nm { min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tree .ct { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.tree .none { padding: 12px; color: var(--muted); font-size: 14px; }
+.page { background: var(--panel); padding: 18px 22px 22px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.crumb { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.crumb b { color: var(--peach); font-weight: 400; }
+.field { width: 100%; background: transparent; color: var(--fg); border: 0; border-bottom: 1px solid transparent; font: inherit; padding: 4px 0; }
+.field:hover { border-bottom-color: var(--line); }
+.field.title { font-family: var(--display); font-size: 30px; letter-spacing: .02em; line-height: 1.1; text-transform: uppercase; }
+textarea.field { resize: vertical; min-height: 300px; line-height: 1.6; font-size: 17px; border: 1px solid var(--line); border-radius: 4px; padding: 12px 14px; background: var(--space); flex: 1; }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.meta select { background: var(--space); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; font: inherit; padding: 3px 6px; max-width: 100%; }
+.saved { color: var(--green); } .saving { color: var(--peach); } .err { color: var(--red); }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.logtext { background: var(--space); border: 1px solid var(--line); border-radius: 4px; padding: 14px; font-size: 17px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+.cards button { all: unset; box-sizing: border-box; cursor: pointer; background: var(--space); border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; display: grid; gap: 4px; min-width: 0; }
+.cards button:hover { border-color: var(--blue); }
+.cards button:focus-visible { outline: 2px solid var(--peach); }
+.cards .t { font-family: var(--display); font-size: 16px; text-transform: uppercase; letter-spacing: .04em; overflow-wrap: anywhere; }
+.cards .x { font-size: 13px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cards .k { font-family: var(--mono); font-size: 11px; color: var(--peach); }
+.hint { color: var(--muted); font-size: 14px; }
+.newform { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; margin-top: 10px; }
+.newform label { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.newform input { flex: 1; min-width: 160px; background: var(--space); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; font: inherit; padding: 4px 8px; }
+
+/* Mission record: a row opens its full record above the list */
+.mis .row.open { all: unset; box-sizing: border-box; background: var(--panel); padding: 10px 14px; display: grid; grid-template-columns: 124px minmax(0, 1fr) auto; gap: 12px; align-items: baseline; cursor: pointer; }
+.mis .row.open:hover { background: var(--panel2); }
+.mis .row.open[aria-current="true"] { background: var(--panel2); box-shadow: inset 3px 0 0 var(--orange); }
+.mis .row.open:focus-visible { outline: 2px solid var(--peach); outline-offset: -2px; }
+.rec { margin-top: 12px; background: var(--panel); border: 1px solid var(--line); border-left: 18px solid var(--orange); border-radius: 4px 24px 24px 4px; padding: 18px 22px 22px; display: grid; gap: 16px; }
+.rec-head { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; }
+.rec-head h3 { font-family: var(--display); font-size: 28px; line-height: 1.1; letter-spacing: .02em; text-transform: uppercase; margin: 0; flex: 1; min-width: 220px; text-wrap: balance; }
+.rec .crumb { width: 100%; }
+.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 1px; padding: 1px; border-radius: 4px; overflow: hidden; }
+.fact { background: var(--space); box-shadow: 0 0 0 1px var(--line); padding: 8px 12px; display: grid; gap: 2px; min-width: 0; }
+.fact .k { font-family: var(--display); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.fact .v { font-family: var(--mono); font-size: 15px; color: var(--fg); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.fact .v.hot { color: var(--peach); } .fact .v.bad { color: var(--red); } .fact .v.good { color: var(--green); }
+.rec h4 { font-family: var(--display); font-size: 15px; letter-spacing: .08em; text-transform: uppercase; color: var(--space); background: var(--lilac); display: inline-block; padding: 1px 14px 1px 10px; border-radius: 0 12px 12px 0; margin: 0 0 8px; }
+.rec h4.wc { background: var(--blue); } .rec h4.sm { background: var(--peach); } .rec h4.fl { background: var(--orange); }
+.rec p { margin: 0; max-width: 72ch; }
+.rec ol { margin: 8px 0 0; padding-left: 22px; display: grid; gap: 4px; max-width: 72ch; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-family: var(--mono); font-size: 12px; padding: 2px 10px; border-radius: 10px; background: var(--space); border: 1px solid var(--line); color: var(--fg); overflow-wrap: anywhere; }
+.chip.m { border-color: var(--peach); color: var(--peach); } .chip.p { border-color: var(--lilac); color: var(--lilac); } .chip.s { border-color: var(--blue); color: var(--blue); }
+.chip b { color: var(--muted); font-weight: 400; margin-left: 4px; }
+.files { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: 13px; display: grid; gap: 2px; max-height: 280px; overflow: auto; background: var(--space); border: 1px solid var(--line); border-radius: 4px; padding: 8px 12px; }
+.files li { overflow-wrap: anywhere; } .files li span { color: var(--muted); }
+.shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.shots a { display: grid; gap: 6px; background: var(--space); border: 1px solid var(--line); border-radius: 4px; padding: 6px; color: var(--fg); text-decoration: none; min-width: 0; }
+.shots a:hover { border-color: var(--peach); }
+.shots a:focus-visible { outline: 2px solid var(--peach); outline-offset: 2px; }
+.shots img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top; border-radius: 2px; background: var(--panel2); }
+.shots .c { font-size: 14px; line-height: 1.35; overflow-wrap: anywhere; }
+.shots .k { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.rec h4.mo { background: var(--green); }
+.shots button { all: unset; box-sizing: border-box; cursor: pointer; display: grid; gap: 6px; background: var(--space); border: 1px solid var(--line); border-radius: 4px; padding: 6px; color: var(--fg); min-width: 0; }
+.shots button:hover { border-color: var(--peach); }
+.shots button:focus-visible { outline: 2px solid var(--peach); outline-offset: 2px; }
+.shots .doc { aspect-ratio: 16 / 10; display: grid; place-items: center; background: var(--panel2); border-radius: 2px; font-family: var(--display); font-size: 22px; letter-spacing: .08em; color: var(--peach); }
+.pins-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pins-head h4 { font-family: var(--display); font-size: 15px; letter-spacing: .08em; text-transform: uppercase; color: var(--space); background: var(--green); padding: 1px 14px 1px 10px; border-radius: 0 12px 12px 0; margin: 0; }
+.drop-zone { outline: 2px dashed var(--green); outline-offset: 4px; }
+dialog.viewer { background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; width: min(1000px, 94vw); max-height: 92vh; }
+dialog.viewer::backdrop { background: rgb(0 0 0 / .75); }
+dialog.viewer .vbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+dialog.viewer .vbar span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+dialog.viewer img { display: block; max-width: 100%; max-height: 78vh; margin: 0 auto; border-radius: 4px; }
+dialog.viewer iframe { width: 100%; height: 78vh; border: 0; background: #fff; border-radius: 4px; }
+.rec h4.cl { background: var(--green); }
+.pill.closed { border-color: var(--green); color: var(--green); }
+.outcome { font-family: var(--display); font-size: 14px; letter-spacing: .08em; text-transform: uppercase; padding: 1px 12px; border-radius: 10px; color: var(--space); background: var(--green); }
+.outcome.partial { background: var(--peach); } .outcome.abandoned { background: var(--red); }
+.rec ul.cl-list { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 3px; max-width: 72ch; }
+.cl-sub { font-family: var(--display); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-top: 10px; }
+.rec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+
+/* Editing a mission record, and exporting records as Markdown */
+.rec-tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.ed { display: grid; gap: 12px; }
+.ed label { display: grid; gap: 4px; font-family: var(--display); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.ed label small { font-family: var(--body); font-size: 13px; letter-spacing: 0; text-transform: none; }
+.ed input, .ed textarea, .ed select { background: var(--space); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; font: 16px/1.5 var(--body); padding: 8px 10px; width: 100%; text-transform: none; letter-spacing: 0; }
+.ed input:focus-visible, .ed textarea:focus-visible, .ed select:focus-visible { outline: 2px solid var(--peach); outline-offset: 1px; }
+.ed textarea { resize: vertical; min-height: 90px; }
+.ed textarea.big { min-height: 160px; }
+.ed .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.mis-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.mis-head .nb-tools { margin-left: auto; }
+.toast { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+
+@media (max-width: 760px) { .nb { grid-template-columns: 1fr; } .tree { max-height: 320px; } }
+@media (max-width: 640px) { .wrap { grid-template-columns: 1fr; } .elbow { display: none; } .row, .mis .row, .mis .row.open { grid-template-columns: 1fr; gap: 2px; } .rec { padding: 14px; border-left-width: 10px; } .rec-head h3 { font-size: 22px; } .page { padding: 14px; } .field.title { font-size: 24px; } }
+@media (prefers-reduced-motion: no-preference) { .card svg .bob { animation: bob 1.4s steps(2) infinite; } @keyframes bob { 50% { transform: translateY(-1px); } } }
+</style>
+
+<div class="wrap">
+  <nav class="elbow" aria-label="Sections"><a class="b1" href="#top">LCARS 47</a><span aria-hidden="true"></span><a class="b2" href="#h-log">NOTES</a><span aria-hidden="true"></span><a class="b3" href="#h-crew">CREW</a><span aria-hidden="true"></span><a href="#h-mis">MISSIONS</a></nav>
+  <main>
+    <header>
+      <h1 id="top">Starfleet Command</h1>
+      <div class="stardate" id="sd">Stardate —</div>
+    </header>
+    <p class="sub">Records from the USS Claude. Notes live here by project, in folders you make. Drag notes and folders in the tree to move or reorder them. Entries captured in Claude Code with <code>/log</code> sync into each project’s Captain’s log folder.</p>
+
+    <section aria-labelledby="h-log">
+      <div class="nb-head">
+        <h2 class="tag log" id="h-log">Captain’s notebook</h2><span class="count" id="n-log"></span>
+        <div class="nb-tools">
+          <button class="btn o" id="b-proj" type="button" disabled>+ Project</button>
+          <button class="btn l" id="b-fold" type="button" disabled>+ Folder</button>
+          <button class="btn p" id="b-note" type="button" disabled>+ Note</button>
+        </div>
+      </div>
+      <form class="newform" id="nf" hidden>
+        <label for="nf-in" id="nf-lb">New folder</label>
+        <input id="nf-in" autocomplete="off" maxlength="80" required>
+        <button class="btn" type="submit">Create</button>
+        <button class="btn ghost" type="button" id="nf-x">Cancel</button>
+      </form>
+      <div class="nb">
+        <nav class="tree" id="tree" aria-label="Notebook"><div class="none">Connecting…</div></nav>
+        <div class="page" id="page"><p class="hint">Pick a project or note on the left.</p></div>
+      </div>
+    </section>
+
+    <section aria-labelledby="h-crew">
+      <h2 class="tag crew" id="h-crew">Crew roster</h2><span class="count" id="n-crew"></span>
+      <div id="crew"><div class="empty">The crew reports here after the first sync. Each of your code projects gets a crew member, standing on the deck that matches its state.</div></div>
+    </section>
+
+    <section aria-labelledby="h-mis" class="mis">
+      <div class="mis-head">
+        <h2 class="tag mis" id="h-mis">Mission history</h2><span class="count" id="n-mis"></span>
+        <div class="nb-tools"><span class="toast" id="x-state" role="status"></span><button class="btn o" id="b-xall" type="button" hidden>Export all</button></div>
+      </div>
+      <div id="mis-rec"></div>
+      <div id="mis"><div class="empty">Each Claude Code session becomes a mission here. Click one to open its full record: dates, warp core report, models, plugins, files and a summary. Press Close mission in the console to file a closure report before archiving a chat.</div></div>
+    </section>
+
+    <dialog class="viewer" id="viewer" aria-label="File viewer"><div class="vbar"><span id="v-name"></span><button class="btn o" id="v-dl" type="button" hidden>Download</button><button class="btn ghost" id="v-x" type="button">Close</button></div><div id="v-body"></div></dialog>
+
+    <p class="off" id="status">Connecting to ship’s records…</p>
+  </main>
+</div>
+
+<script>
+const PAL = { s:'#f2c6a8', d:'#8a4a2a', a:'#f3e3c0', r:'#e0443e', y:'#e8a33a', g:'#b9b6c4', h:'#f6cf6a', k:'#1c1c22', v:'#8c8a96', b:'#3a2a22', t:'#4aa3c7', w:'#efe9df', n:'#6b3e24', p:'#9b6bb5' };
+const SPRITES = {
+  picard: ['..ssss..','.ssssss.','.sksskk.','.ssssss.','..ssss..','.rrrrrr.','rkrrrrkr','rrrrrrrr','.kk..kk.'],
+  seven:  ['..hhhh..','.hhhhhh.','hskssksh','hssssssh','..ssss..','.gggggg.','gggggggg','.gggggg.','.gg..gg.'],
+  worf:   ['.bbbbbb.','bdddddbb','bdkddkdb','bddddddb','.dddddd.','.yyyyyy.','ygyyyyyy','yyyyyyyy','.kk..kk.'],
+  geordi: ['..kkkk..','.dddddd.','.vvvvvv.','.dddddd.','..dddd..','.yyyyyy.','ykyyyyky','yyyyyyyy','.kk..kk.'],
+  data:   ['..kkkk..','.kaaaak.','.akaaka.','.aaaaaa.','..aaaa..','.yyyyyy.','ykyyyyky','yyyyyyyy','.kk..kk.'],
+  riker:  ['..nnnn..','.nssssn.','.sksskk.','.nnnnnn.','..nnnn..','.rrrrrr.','rkrrrrkr','rrrrrrrr','.kk..kk.'],
+  troi:   ['.kkkkkk.','kkssssk.','kskssksk','kssssssk','k.ssss.k','.pppppp.','pppppppp','.pppppp.','.pp..pp.'],
+  crusher:['.rrrrrr.','rrssssrr','rskssksr','.ssssss.','..ssss..','.tttttt.','tkttttkt','tttttttt','.kk..kk.'],
+};
+function sprite(key, label) {
+  const rows = SPRITES[key] || SPRITES.data; let r = '';
+  rows.forEach((row, y) => [...row].forEach((c, x) => { if (c !== '.') r += `<rect x="${x}" y="${y}" width="1" height="1" fill="${PAL[c]}"/>`; }));
+  return `<svg width="48" height="54" viewBox="0 0 8 9" shape-rendering="crispEdges" role="img" aria-label="${String(label).replace(/[&<>"']/g, ch => `&#${ch.charCodeAt(0)};`)}"><g class="bob">${r}</g></svg>`;
+}
+function stardate(ms) {
+  const d = new Date(ms), start = Date.UTC(d.getUTCFullYear(), 0, 1);
+  return (1000 * (d.getUTCFullYear() - 1946) + 1000 * (ms - start) / (365.25 * 86400000)).toFixed(1);
+}
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function btn(cls, text, fn) { const b = el('button', 'btn ' + cls, text); b.type = 'button'; b.onclick = fn; return b; }
+const $ = id => document.getElementById(id);
+// The header clock: stardate in the mod's YYYY.MMDD.HHMM form, then local time, kept live
+function tickClock() {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  const sd = `${d.getFullYear()}.${p(d.getMonth() + 1)}${p(d.getDate())}.${p(d.getHours())}${p(d.getMinutes())}`;
+  $('sd').textContent = `Stardate ${sd} · ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+}
+tickClock(); setInterval(tickClock, 15000);
+
+/* ---------- Notebook ---------- */
+// Synced /log entries stay in "log" (the mod owns them). Notes, folders and projects made here live in their own collections.
+const UNFILED = 'Unfiled';
+const S = { log: [], notes: [], folders: [], projects: [], crew: [], pins: [] };
+let db = null;
+const store = { get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
+let sel = store.get('nb-sel', null);          // {kind:'project'|'folder'|'note'|'log'|'logf', id, project}
+const open = new Set(store.get('nb-open', []));
+let paneKey = null, saveTimer = null, pending = null;
+
+const docs = s => s.docs.map(d => ({ id: d.id, ...(d.data() || {}) }));
+const projOf = v => v.project || UNFILED;
+const noteById = id => S.notes.find(n => n.id === id);
+const folderById = id => S.folders.find(f => f.id === id);
+const byName = (a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+
+function projectNames() {
+  const set = new Set();
+  [S.projects.map(p => p.name), S.log.map(projOf), S.notes.map(projOf), S.folders.map(projOf), S.crew.map(c => c.project).filter(Boolean)]
+    .flat().forEach(n => n && set.add(n));
+  return [...set].sort((a, b) => a === UNFILED ? 1 : b === UNFILED ? -1 : a.localeCompare(b, undefined, { sensitivity: 'base' }));
+}
+function folderPath(fid) {
+  const out = []; let f = folderById(fid), guard = 0;
+  while (f && guard++ < 20) { out.unshift(f); f = folderById(f.parent); }
+  return out;
+}
+function setSel(s) { flush(); sel = s; store.set('nb-sel', s); renderTree(); renderPane(); }
+function toggle(key, force) { const on = force ?? !open.has(key); on ? open.add(key) : open.delete(key); store.set('nb-open', [...open]); }
+function context() {
+  if (!sel) return { project: projectNames()[0] || UNFILED, folder: '' };
+  if (sel.kind === 'folder') { const f = folderById(sel.id); return { project: f ? projOf(f) : sel.project, folder: sel.id }; }
+  if (sel.kind === 'note') { const n = noteById(sel.id); return { project: n ? projOf(n) : sel.project, folder: n?.folder || '' }; }
+  return { project: sel.project || UNFILED, folder: '' };
+}
+
+function treeItem(cls, label, count, s, twKey) {
+  const li = el('li', cls), b = el('button');
+  const cur = sel && sel.kind === s.kind && sel.id === s.id && (s.kind !== 'project' && s.kind !== 'logf' || sel.project === s.project);
+  b.setAttribute('aria-current', cur ? 'true' : 'false');
+  if (twKey) { b.append(el('span', 'tw', open.has(twKey) ? '▾' : '▸')); b.setAttribute('aria-expanded', open.has(twKey)); }
+  else b.append(el('span', 'tw', ''));
+  b.append(el('span', 'ic'), el('span', 'nm', label));
+  if (count != null) b.append(el('span', 'ct', count));
+  b.onclick = () => { if (twKey) toggle(twKey, cur ? undefined : true); setSel(s); };
+  wireDrag(li, b, s);
+  li.append(b); return li;
+}
+
+/* Drag a note or folder onto a project (top level), a folder (into it) or a note (just above it) */
+let dragging = null;
+const home = n => n.folder && folderById(n.folder) ? n.folder : '';
+const byOrder = (a, b) => (a.order ?? a.at ?? 0) - (b.order ?? b.at ?? 0);
+function subfolderIds(fid) { const out = []; S.folders.filter(f => f.parent === fid).forEach(f => out.push(f.id, ...subfolderIds(f.id))); return out; }
+function dropPlan(s) {
+  if (!dragging || !db || (dragging.kind === s.kind && dragging.id === s.id)) return null;
+  if (s.kind === 'project') return { mode: 'into', project: s.project, folder: '' };
+  if (s.kind === 'folder') {
+    if (dragging.kind === 'folder' && subfolderIds(dragging.id).includes(s.id)) return null;
+    return { mode: 'into', project: s.project, folder: s.id };
+  }
+  if (s.kind === 'note' && dragging.kind === 'note') { const t = noteById(s.id); return t && { mode: 'before', project: projOf(t), folder: home(t), before: t.id }; }
+  return null;
+}
+function clearDrop() { document.querySelectorAll('.drop-into,.drop-before').forEach(x => x.classList.remove('drop-into', 'drop-before')); }
+function wireDrag(li, b, s) {
+  if (s.kind === 'note' || s.kind === 'folder') {
+    b.draggable = true;
+    b.addEventListener('dragstart', e => { flush(); dragging = { kind: s.kind, id: s.id }; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', s.id); li.classList.add('dragging'); });
+    b.addEventListener('dragend', () => { dragging = null; li.classList.remove('dragging'); clearDrop(); if (treeStale) renderTree(); });
+  }
+  if (!['project', 'folder', 'note'].includes(s.kind)) return;
+  b.addEventListener('dragover', e => { const p = dropPlan(s); if (!p) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; clearDrop(); b.classList.add(p.mode === 'into' ? 'drop-into' : 'drop-before'); });
+  b.addEventListener('dragleave', () => b.classList.remove('drop-into', 'drop-before'));
+  b.addEventListener('drop', e => {
+    const p = dropPlan(s); clearDrop(); if (!p) return; e.preventDefault();
+    const d = dragging; dragging = null;
+    toggle('p:' + p.project, true); if (p.folder) toggle('f:' + p.folder, true);
+    renderTree();
+    (d.kind === 'note' ? moveNote(noteById(d.id), p.project, p.folder, p.before) : moveFolder(folderById(d.id), p.project, p.folder)).catch(saveErr);
+  });
+}
+async function moveNote(n, project, folder, before) {
+  if (!n) return;
+  const sibs = S.notes.filter(x => x.id !== n.id && projOf(x) === project && home(x) === folder).sort(byOrder);
+  const at = before ? sibs.findIndex(x => x.id === before) : -1;
+  sibs.splice(at < 0 ? sibs.length : at, 0, n);
+  await Promise.all(sibs.map((x, i) => x === n
+    ? db.collection('notes').doc(x.id).update({ project, folder, order: i })
+    : x.order === i ? null : db.collection('notes').doc(x.id).update({ order: i })));
+}
+async function moveFolder(f, project, parent) {
+  if (!f || parent === f.id || subfolderIds(f.id).includes(parent)) return;
+  const writes = [db.collection('folders').doc(f.id).update({ project, parent })];
+  if (projOf(f) !== project) {
+    // A folder changing project takes everything inside it along
+    const inside = subfolderIds(f.id);
+    inside.forEach(id => writes.push(db.collection('folders').doc(id).update({ project })));
+    S.notes.filter(n => n.folder === f.id || inside.includes(n.folder)).forEach(n => writes.push(db.collection('notes').doc(n.id).update({ project })));
+  }
+  await Promise.all(writes);
+}
+function folderBranch(project, parent) {
+  const ul = el('ul');
+  S.folders.filter(f => projOf(f) === project && (f.parent || '') === parent).sort(byName).forEach(f => {
+    const key = 'f:' + f.id, kids = S.notes.filter(n => n.folder === f.id).length;
+    const li = treeItem('fold', f.name || 'Folder', kids || null, { kind: 'folder', id: f.id, project }, key);
+    if (open.has(key)) li.append(folderBranch(project, f.id));
+    ul.append(li);
+  });
+  // A note whose folder was removed elsewhere shows at the project's top level
+  S.notes.filter(n => projOf(n) === project && home(n) === parent).sort(byOrder)
+    .forEach(n => ul.append(treeItem('note', n.title || 'Untitled note', null, { kind: 'note', id: n.id, project })));
+  return ul;
+}
+let treeStale = false;
+function renderTree() {
+  // Rebuilding mid-drag would drop the dragged row; catch up when the drag ends
+  if (dragging) { treeStale = true; return; }
+  treeStale = false;
+  const host = $('tree'), names = projectNames();
+  $('n-log').textContent = `${S.notes.length} notes · ${S.log.length} log entries`;
+  if (!names.length) { host.replaceChildren(el('div', 'none', 'No projects yet. Press + Project to start one, or + Note to start writing.')); return; }
+  const ul = el('ul');
+  names.forEach(p => {
+    const key = 'p:' + p, nNotes = S.notes.filter(n => projOf(n) === p).length;
+    const li = treeItem('proj', p, nNotes || null, { kind: 'project', id: p, project: p }, key);
+    if (open.has(key)) {
+      const inner = folderBranch(p, '');
+      const logs = S.log.filter(e => projOf(e) === p);
+      if (logs.length) {
+        const lk = 'l:' + p, lf = treeItem('logf', 'Captain’s log', logs.length, { kind: 'logf', id: p, project: p }, lk);
+        if (open.has(lk)) { const lu = el('ul'); logs.forEach(e => lu.append(treeItem('logn', (e.stardate || '—') + '  ' + (e.text || ''), null, { kind: 'log', id: e.id, project: p }))); lf.append(lu); }
+        inner.prepend(lf);
+      }
+      li.append(inner);
+    }
+    ul.append(li);
+  });
+  host.replaceChildren(ul);
+}
+
+function crumb(project, folderId, extra) {
+  const c = el('div', 'crumb'); c.append(el('b', '', project));
+  folderPath(folderId).forEach(f => c.append(' / ' + (f.name || 'Folder')));
+  if (extra) c.append(' / ' + extra);
+  return c;
+}
+function noteCards(list) {
+  const g = el('div', 'cards');
+  list.forEach(n => { const b = el('button'); b.type = 'button';
+    b.append(el('span', 't', n.title || 'Untitled note'), el('span', 'x', (n.body || '').slice(0, 160) || 'Empty'), el('span', 'k', 'SD ' + stardate(n.updated || n.at || Date.now())));
+    b.onclick = () => setSel({ kind: 'note', id: n.id, project: projOf(n) }); g.append(b); });
+  return g;
+}
+function armDelete(label, fn) {
+  const b = btn('warn', label, () => { if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = 'Click again to confirm'; setTimeout(() => { b.classList.remove('armed'); b.textContent = label; }, 3000); return; } fn(); });
+  return b;
+}
+
+function renderPane() {
+  const host = $('page');
+  const key = sel ? sel.kind + ':' + sel.id + ':' + sel.project : 'none';
+  if (sel?.kind === 'note' && paneKey === key) { refreshNote(); return; }
+  if (paneKey === key && host.contains(document.activeElement) && document.activeElement.matches('input,textarea,select')) return;
+  paneKey = key;
+  if (!sel) { host.replaceChildren(el('p', 'hint', 'Pick a project or note on the left.')); return; }
+
+  if (sel.kind === 'note') {
+    const n = noteById(sel.id);
+    if (!n) { paneKey = null; host.replaceChildren(el('p', 'hint', db ? 'Opening note…' : 'This note is not available in this view.')); return; }
+    const project = projOf(n);
+    const title = el('input', 'field title'); title.id = 'n-title'; title.value = n.title || ''; title.placeholder = 'Untitled note'; title.setAttribute('aria-label', 'Note title'); title.maxLength = 140;
+    const body = el('textarea', 'field'); body.id = 'n-body'; body.value = n.body || ''; body.placeholder = 'Write here…'; body.setAttribute('aria-label', 'Note body');
+    title.oninput = body.oninput = () => queueSave(n.id, { title: title.value, body: body.value });
+    const meta = el('div', 'meta');
+    const move = el('select'); move.setAttribute('aria-label', 'Move to folder');
+    const opts = [['', project + ' (top level)'], ...S.folders.filter(f => projOf(f) === project).map(f => [f.id, folderPath(f.id).map(x => x.name).join(' / ')]).sort((a, b) => a[1].localeCompare(b[1]))];
+    opts.forEach(([v, t]) => { const o = el('option', '', t); o.value = v; if ((n.folder || '') === v) o.selected = true; move.append(o); });
+    move.onchange = () => db.collection('notes').doc(n.id).update({ folder: move.value, updated: Date.now() }).then(() => { if (move.value) toggle('f:' + move.value, true); }).catch(saveErr);
+    const lab = el('span', '', 'Folder');
+    meta.append(el('span', '', 'Created SD ' + stardate(n.at || Date.now())), lab, move, el('span', 'saved', ''));
+    meta.lastChild.id = 'n-state';
+    const acts = el('div', 'actions');
+    acts.append(armDelete('Delete note', () => { clearTimeout(saveTimer); pending = null; const f = n.folder; db.collection('notes').doc(n.id).delete().catch(saveErr); setSel(f && folderById(f) ? { kind: 'folder', id: f, project } : { kind: 'project', id: project, project }); }));
+    host.replaceChildren(crumb(project, n.folder), title, meta, body, acts);
+    if ((n.title || '') === 'Untitled note' && !n.body) { title.select(); title.focus(); }
+    return;
+  }
+
+  if (sel.kind === 'log') {
+    const e = S.log.find(x => x.id === sel.id);
+    if (!e) { host.replaceChildren(el('p', 'hint', 'That log entry is gone.')); return; }
+    const p = projOf(e), acts = el('div', 'actions');
+    acts.append(btn('p', 'Turn into note', () => createNote(p, '', (e.text || '').split('\n')[0].slice(0, 60) || 'Log note', `${e.text || ''}\n\n— Logged at stardate ${e.stardate || '—'}`)),
+      armDelete('Delete entry', () => deleteLog(e)));
+    host.replaceChildren(crumb(p, '', 'Captain’s log'), el('div', 'field title', 'Stardate ' + (e.stardate || '—')), el('div', 'logtext', e.text || ''),
+      el('p', 'hint', 'Synced from /log in Claude Code. Deleting it here keeps it off the hub, and later syncs skip it.'), acts);
+    return;
+  }
+
+  if (sel.kind === 'logf') {
+    const p = sel.project, logs = S.log.filter(e => projOf(e) === p), list = el('div', 'list');
+    logs.forEach(e => { const r = el('div', 'row'); r.append(el('div', 'sd', e.stardate || '—'), el('div', 'txt', e.text || '')); list.append(r); });
+    host.replaceChildren(crumb(p, ''), el('div', 'field title', 'Captain’s log'), el('p', 'hint', logs.length + ' entries synced from /log.'), list);
+    return;
+  }
+
+  const isFolder = sel.kind === 'folder', f = isFolder ? folderById(sel.id) : null;
+  if (isFolder && !f) { paneKey = null; host.replaceChildren(el('p', 'hint', db ? 'Opening folder…' : 'This folder is not available in this view.')); return; }
+  const project = isFolder ? projOf(f) : sel.project, fid = isFolder ? f.id : '';
+  const notes = S.notes.filter(n => projOf(n) === project && (n.folder || '') === fid);
+  const subs = S.folders.filter(x => projOf(x) === project && (x.parent || '') === fid).sort(byName);
+  const parts = [crumb(project, isFolder ? f.parent : '')];
+  if (isFolder) {
+    const name = el('input', 'field title'); name.value = f.name || ''; name.setAttribute('aria-label', 'Folder name'); name.maxLength = 80;
+    name.onchange = () => { const v = name.value.trim(); if (v && v !== f.name) db.collection('folders').doc(f.id).update({ name: v }).catch(saveErr); };
+    parts.push(name);
+  } else parts.push(el('div', 'field title', project));
+  const logs = isFolder ? 0 : S.log.filter(e => projOf(e) === project).length;
+  parts.push(el('p', 'hint', [`${notes.length} note${notes.length === 1 ? '' : 's'}`, subs.length ? `${subs.length} folder${subs.length === 1 ? '' : 's'}` : '', logs ? `${logs} log entries` : ''].filter(Boolean).join(' · ')));
+  parts.push(pinnedBlock(project, fid));
+  if (subs.length) { const g = el('div', 'cards');
+    subs.forEach(s => { const b = el('button'); b.type = 'button'; b.append(el('span', 't', '▸ ' + (s.name || 'Folder')), el('span', 'x', S.notes.filter(n => n.folder === s.id).length + ' notes'));
+      b.onclick = () => { toggle('f:' + s.id, true); setSel({ kind: 'folder', id: s.id, project }); }; g.append(b); });
+    parts.push(g); }
+  parts.push(notes.length ? noteCards(notes.sort(byOrder)) : el('p', 'hint', 'Nothing here yet.'));
+  const acts = el('div', 'actions');
+  acts.append(btn('p', '+ Note here', () => createNote(project, fid)), btn('l', isFolder ? '+ Subfolder' : '+ Folder', () => openForm('folder')));
+  if (isFolder) acts.append(armDelete('Delete folder', () => deleteFolder(f)));
+  else if (!S.notes.some(n => projOf(n) === project) && !S.folders.some(x => projOf(x) === project) && S.projects.some(x => x.name === project))
+    acts.append(armDelete('Remove project', () => { S.projects.filter(x => x.name === project).forEach(x => db.collection('projects').doc(x.id).delete().catch(saveErr)); setSel(null); }));
+  if (isFolder) parts.push(el('p', 'hint', 'Deleting a folder keeps its notes: they move up one level.'));
+  parts.push(acts);
+  host.replaceChildren(...parts);
+}
+
+function refreshNote() {
+  const n = noteById(sel.id); if (!n) { paneKey = null; renderPane(); return; }
+  const t = $('n-title'), b = $('n-body');
+  if (pending) return;  // our own edits are in flight; don't fight the cursor
+  if (t && document.activeElement !== t && t.value !== (n.title || '')) t.value = n.title || '';
+  if (b && document.activeElement !== b && b.value !== (n.body || '')) b.value = n.body || '';
+}
+function setState(cls, text) { const s = $('n-state'); if (s) { s.className = cls; s.textContent = text; } }
+function saveErr() { setState('err', 'Not saved. Check your connection.'); }
+function queueSave(id, data) { pending = { id, data }; setState('saving', 'Saving…'); clearTimeout(saveTimer); saveTimer = setTimeout(flush, 600); }
+function flush() {
+  clearTimeout(saveTimer); if (!pending || !db) return;
+  const { id, data } = pending; pending = null;
+  db.collection('notes').doc(id).update({ ...data, title: data.title.trim() || 'Untitled note', updated: Date.now() })
+    .then(() => { if (!pending) setState('saved', 'Saved'); }).catch(saveErr);
+}
+window.addEventListener('pagehide', flush);
+
+async function createNote(project, folder, title = 'Untitled note', body = '') {
+  const now = Date.now();
+  try {
+    const ref = await db.collection('notes').add({ title, body, project, folder, at: now, updated: now, order: now });
+    toggle('p:' + project, true); if (folder) folderPath(folder).forEach(f => toggle('f:' + f.id, true));
+    setSel({ kind: 'note', id: ref.id, project });
+  } catch { $('status').textContent = 'Could not create the note. Check your connection.'; }
+}
+// A deleted log entry is remembered in logDeleted, so the next sync from Claude Code skips it
+async function deleteLog(e) {
+  const p = projOf(e);
+  try {
+    await db.collection('logDeleted').doc(e.id).set({ at: Date.now(), project: p });
+    await db.collection('log').doc(e.id).delete();
+  } catch { $('status').textContent = 'Could not delete that entry. Check your connection.'; return; }
+  setSel(S.log.some(x => x.id !== e.id && projOf(x) === p) ? { kind: 'logf', id: p, project: p } : { kind: 'project', id: p, project: p });
+}
+// A deleted mission is remembered in missionDeleted, so the next sync from Claude Code skips it
+async function deleteMission(v) {
+  try {
+    await db.collection('missionDeleted').doc(v.id).set({ at: Date.now(), project: v.project || '' });
+    await db.collection('missions').doc(v.id).delete();
+  } catch { $('status').textContent = 'Could not delete that mission. Check your connection.'; return; }
+  misSel = null; store.set('mis-sel', null);
+}
+/* ---------- Pinned files: your own docs, images and PDFs, pinned to a project or folder ---------- */
+let assets = null;
+// Only https or same-origin links are shown, so a stored url can never be a javascript: or data: page
+const safeUrl = u => typeof u === 'string' && /^(https:|\/(?!\/))/i.test(u);
+const kindOf = t => (t || '').startsWith('image/') ? 'image' : t === 'application/pdf' ? 'pdf' : 'file';
+const extOf = name => ((name || '').split('.').pop() || 'file').slice(0, 5).toUpperCase();
+function fileCard(x, onOpen) {
+  const b = el('button'); b.type = 'button';
+  if (kindOf(x.type) === 'image' && safeUrl(x.url)) { const img = el('img'); img.src = x.url; img.alt = x.name || 'Pinned image'; img.loading = 'lazy'; b.append(img); }
+  else b.append(el('span', 'doc', extOf(x.name)));
+  b.append(el('span', 'c', x.name || 'File'), el('span', 'k', (x.at ? when(x.at) : '') + (x.size ? ' · ' + Math.max(1, Math.round(x.size / 1024)) + ' KB' : '')));
+  b.onclick = onOpen; return b;
+}
+function pinnedBlock(project, folder) {
+  const wrap = el('div'), head = el('div', 'pins-head'), pins = S.pins.filter(x => (x.project || UNFILED) === project && (x.folder || '') === folder).sort((a, b) => (b.at || 0) - (a.at || 0));
+  head.append(el('h4', '', 'Pinned files'));
+  if (assets) {
+    const input = el('input'); input.type = 'file'; input.multiple = true; input.hidden = true;
+    input.accept = 'image/*,application/pdf,.txt,.md,.csv,.json';
+    input.onchange = () => { pinFiles([...input.files], project, folder); input.value = ''; };
+    head.append(btn('p', '+ Pin file', () => input.click()), input);
+    // Drop files anywhere on the pinned block too
+    wrap.addEventListener('dragover', e => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); wrap.classList.add('drop-zone'); } });
+    wrap.addEventListener('dragleave', () => wrap.classList.remove('drop-zone'));
+    wrap.addEventListener('drop', e => { if (!e.dataTransfer?.files?.length) return; e.preventDefault(); wrap.classList.remove('drop-zone'); pinFiles([...e.dataTransfer.files], project, folder); });
+  }
+  const st = el('span', 'hint'); st.id = 'pin-state'; head.append(st);
+  wrap.append(head);
+  if (pins.length) { const g = el('div', 'shots'); g.style.marginTop = '8px'; pins.forEach(x => g.append(fileCard(x, () => openViewer(x)))); wrap.append(g); }
+  else wrap.append(el('p', 'hint', assets ? 'Nothing pinned. Press + Pin file or drop images, PDFs or text files here.' : 'Nothing pinned.'));
+  return wrap;
+}
+async function pinFiles(files, project, folder) {
+  const st = () => $('pin-state');
+  for (const f of files) {
+    if (st()) st().textContent = 'Uploading ' + f.name + '…';
+    try {
+      const up = await assets.upload(f);
+      await db.collection('pins').add({ project, folder, name: f.name, url: up.url, assetId: up.id, type: up.contentType || f.type, size: up.sizeBytes || f.size, at: Date.now() });
+      if (st()) st().textContent = 'Pinned ' + f.name;
+    } catch (err) {
+      const code = err?.code || '';
+      if (st()) st().textContent = code === 'unsupported_type' ? f.name + ' is not a supported type. Use an image, PDF or text file.' : code === 'too_large' ? f.name + ' is too large (20 MB max).' : 'Could not pin ' + f.name + '.';
+    }
+  }
+}
+async function unpin(x) {
+  try { await db.collection('pins').doc(x.id).delete(); if (assets && x.assetId) await assets.delete(x.assetId).catch(() => {}); }
+  catch { $('status').textContent = 'Could not unpin that file. Check your connection.'; }
+}
+// Redraw a project or folder page for new pins; leave an open note editor alone
+function refreshPins() { if (!sel || sel.kind === 'project' || sel.kind === 'folder') { paneKey = null; renderPane(); } }
+let viewing = null;
+async function openViewer(x) {
+  viewing = x;
+  const body = $('v-body'), k = kindOf(x.type);
+  $('v-name').textContent = x.name || 'File';
+  if (!safeUrl(x.url)) { body.replaceChildren(el('p', 'hint', 'Preview not available.')); $('v-dl').hidden = true; $('viewer').showModal(); return; }
+  if (k === 'image') { const img = el('img'); img.src = x.url; img.alt = x.name || 'Image'; body.replaceChildren(img); }
+  else if (k === 'pdf') { const fr = el('iframe'); fr.src = x.url; fr.title = x.name || 'PDF'; body.replaceChildren(fr); }
+  else {
+    const pre = el('pre', 'logtext', 'Loading…'); body.replaceChildren(pre);
+    fetch(x.url).then(r => r.ok ? r.text() : Promise.reject()).then(t => { pre.textContent = t.slice(0, 200000); }).catch(() => { pre.textContent = 'Preview not available. Use Download.'; });
+  }
+  $('v-dl').hidden = !downloads;
+  const bar = $('v-dl').parentNode; bar.querySelector('.warn')?.remove();
+  if (x.id && S.pins.some(p => p.id === x.id) && assets) bar.insertBefore(armDelete('Unpin', () => { unpin(x); $('viewer').close(); }), $('v-x'));
+  $('viewer').showModal();
+}
+$('v-x').onclick = () => $('viewer').close();
+$('viewer').addEventListener('click', e => { if (e.target === $('viewer')) $('viewer').close(); });
+$('v-dl').onclick = async () => {
+  if (!viewing || !downloads) return;
+  try { const blob = await (await fetch(viewing.url)).blob(); await downloads.save({ filename: viewing.name || 'file', data: blob }); } catch {}
+};
+
+async function deleteFolder(f) {
+  const up = f.parent || '';
+  await Promise.all([
+    ...S.notes.filter(n => n.folder === f.id).map(n => db.collection('notes').doc(n.id).update({ folder: up })),
+    ...S.folders.filter(x => x.parent === f.id).map(x => db.collection('folders').doc(x.id).update({ parent: up })),
+  ]).catch(saveErr);
+  await db.collection('folders').doc(f.id).delete().catch(saveErr);
+  setSel(up ? { kind: 'folder', id: up, project: projOf(f) } : { kind: 'project', id: projOf(f), project: projOf(f) });
+}
+
+let formMode = null;
+function openForm(mode) {
+  formMode = mode; const ctx = context();
+  const where = mode === 'project' ? '' : ' in ' + [ctx.project, ...folderPath(ctx.folder).map(f => f.name)].join(' / ');
+  $('nf-lb').textContent = (mode === 'project' ? 'New project' : 'New folder') + where;
+  $('nf').hidden = false; $('nf-in').value = ''; $('nf-in').focus();
+}
+$('nf-x').onclick = () => { $('nf').hidden = true; };
+$('nf-in').onkeydown = e => { if (e.key === 'Escape') $('nf').hidden = true; };
+$('nf').onsubmit = async e => {
+  e.preventDefault(); const name = $('nf-in').value.trim(); if (!name || !db) return;
+  $('nf').hidden = true;
+  try {
+    if (formMode === 'project') {
+      if (!projectNames().includes(name)) await db.collection('projects').add({ name, at: Date.now() });
+      toggle('p:' + name, true); setSel({ kind: 'project', id: name, project: name });
+    } else {
+      const ctx = context();
+      const ref = await db.collection('folders').add({ name, project: ctx.project, parent: ctx.folder, at: Date.now() });
+      toggle('p:' + ctx.project, true); if (ctx.folder) toggle('f:' + ctx.folder, true); toggle('f:' + ref.id, true);
+      setSel({ kind: 'folder', id: ref.id, project: ctx.project });
+    }
+  } catch { $('status').textContent = 'Could not save that. Check your connection.'; }
+};
+$('b-proj').onclick = () => openForm('project');
+$('b-fold').onclick = () => openForm('folder');
+$('b-note').onclick = () => { const c = context(); createNote(c.project, c.folder); };
+
+/* ---------- Crew & missions ---------- */
+function renderCrew(list) {
+  const host = $('crew');
+  $('n-crew').textContent = list.length ? list.length + ' aboard' : '';
+  if (!list.length) return;
+  const grid = el('div', 'crew');
+  list.forEach(v => { const c = el('div', 'card');
+    c.insertAdjacentHTML('beforeend', sprite(v.sprite, (v.name || 'Crew') + ' pixel sprite'));
+    c.append(el('div', 'nm', v.name || 'Crew member'));
+    c.append(el('div', 'pj', v.project || ''));
+    const deck = (v.deck || 'quarters').toLowerCase();
+    c.append(el('span', 'deck d-' + deck, deck));
+    if (v.status) c.append(el('div', 'pj', v.status));
+    grid.append(c); });
+  host.replaceChildren(grid);
+}
+let missions = [], misSel = store.get('mis-sel', null);
+function renderMissions(list) {
+  missions = list;
+  const host = $('mis');
+  $('n-mis').textContent = list.length ? list.length + ' missions' : '';
+  $('b-xall').hidden = !downloads || !list.length;
+  renderRecord();
+  if (!list.length) return;
+  const wrap = el('div', 'list');
+  list.forEach(v => { const row = el('button', 'row open'); row.type = 'button';
+    row.setAttribute('aria-current', v.id === misSel ? 'true' : 'false');
+    row.setAttribute('aria-label', 'Open mission record: ' + (v.summary || 'Mission') + (v.project ? ', ' + v.project : ''));
+    row.onclick = () => { misSel = misSel === v.id ? null : v.id; store.set('mis-sel', misSel); renderMissions(missions); if (misSel) $('mis-rec').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
+    row.append(el('div', 'sd', v.stardate || '—'));
+    const t = el('div', 'txt', v.summary || 'Mission'); if (v.project) { t.append(' '); t.append(el('span', 'proj', '· ' + v.project)); }
+    row.append(t);
+    const pills = el('div'); pills.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
+    pills.append(el('span', 'pill', (v.turns || 0) + ' turns'));
+    if (v.redAlerts) pills.append(el('span', 'pill red', v.redAlerts + ' red alert' + (v.redAlerts > 1 ? 's' : '')));
+    if (v.handoffs) pills.append(el('span', 'pill ho', v.handoffs + ' handoff' + (v.handoffs > 1 ? 's' : '')));
+    // Every mission synced here is closed; a filed closure report can say partial or abandoned
+    pills.append(el('span', 'pill closed', 'closed' + (v.closure?.outcome && v.closure.outcome !== 'complete' ? ' · ' + v.closure.outcome : '')));
+    row.append(pills); wrap.append(row); });
+  host.replaceChildren(wrap);
+}
+
+/* The full record of one mission, opened from its row */
+const when = ms => ms ? new Date(ms).toLocaleString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
+function span(ms) {
+  if (ms == null || ms < 0) return '—';
+  const s = Math.floor(ms / 1000), d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s`;
+}
+function fact(k, v, cls) { const f = el('div', 'fact'); f.append(el('span', 'k', k), el('span', 'v' + (cls ? ' ' + cls : ''), v)); return f; }
+function chips(list, cls, empty) {
+  if (!list || !list.length) return el('p', 'hint', empty);
+  const c = el('div', 'chips'); list.forEach(x => { const ch = el('span', 'chip ' + cls); if (Array.isArray(x)) { ch.append(x[0]); ch.append(el('b', '', '×' + x[1])); } else ch.append(x); c.append(ch); }); return c;
+}
+function block(h, cls, ...body) { const d = el('div'); d.append(el('h4', cls, h), ...body); return d; }
+/* Markdown export: one record, or every mission at once */
+let downloads = null, editing = null;
+const lines = t => String(t || '').split('\n').map(x => x.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, '').trim()).filter(Boolean);
+function missionMd(v) {
+  const w = v.warpCore || {}, c = v.closure, out = [];
+  out.push(`# ${v.summary || 'Mission' + (v.project ? ' in ' + v.project : '')}`, '');
+  out.push(`- **Project:** ${v.project || 'Unknown'}`, `- **Stardate:** ${v.stardate || '—'}`, `- **Started:** ${when(v.at)}`, `- **Ended:** ${v.endedAt ? when(v.endedAt) : 'In progress'}`);
+  if (v.endedAt) out.push(`- **Length:** ${span(v.endedAt - v.at)}`);
+  if (v.cwd) out.push(`- **Folder:** \`${v.cwd}\``);
+  out.push('', '## Warp core report', '',
+    `| Turns | Orders | Time at warp | Files changed | Commits | Red alerts | Handoffs |`, `|---|---|---|---|---|---|---|`,
+    `| ${v.turns || 0} | ${w.orders ?? '—'} | ${w.warpMs != null ? span(w.warpMs) : '—'} | ${v.files ? v.files.length : '—'} | ${w.commits ?? '—'} | ${v.redAlerts || 0} | ${v.handoffs || 0} |`);
+  out.push('', '## Summary', '', v.report || '_No summary yet._');
+  if (Array.isArray(v.steps) && v.steps.length) out.push('', '### Steps taken', '', ...v.steps.map((x, i) => `${i + 1}. ${x}`));
+  if (v.closed && c) {
+    out.push('', '## Closure report', '', `**Outcome:** ${c.outcome || 'complete'}`);
+    if (c.delivered?.length) out.push('', '### Delivered', '', ...c.delivered.map(x => `- ${x}`));
+    if (c.openItems?.length) out.push('', '### Open items', '', ...c.openItems.map(x => `- ${x}`));
+    if (c.nextStep && c.nextStep !== 'None') out.push('', '### Next step', '', c.nextStep);
+  }
+  if (v.models?.length) out.push('', `**Models:** ${v.models.join(', ')}`);
+  if (v.plugins?.length) out.push('', `**Plugins:** ${v.plugins.join(', ')}`);
+  if (v.files?.length) out.push('', '## Files changed', '', ...v.files.map(f => `- \`${f}\``));
+  return out.join('\n') + '\n';
+}
+const slug = s => (String(s || 'mission').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'mission');
+async function exportMd(filename, text) {
+  const st = $('x-state');
+  if (!downloads) { st.textContent = 'Export is not available in this view.'; return; }
+  try { await downloads.save({ filename, data: text }); st.textContent = 'Exported ' + filename; }
+  catch (e) { st.textContent = e?.code === 'declined' ? 'Export cancelled.' : e?.code === 'rate_limited' ? 'A save prompt is already open.' : 'Export failed. Try again.'; }
+}
+$('b-xall').onclick = () => exportMd(`starfleet-missions-${new Date().toISOString().slice(0, 10)}.md`,
+  `# Starfleet mission history\n\n${missions.length} missions, exported ${when(Date.now())}\n\n` + missions.map(missionMd).join('\n---\n\n'));
+
+function renderEditor(v) {
+  const host = $('mis-rec'), c = v.closure || {};
+  const rec = el('article', 'rec'); rec.setAttribute('aria-label', 'Edit mission record');
+  const head = el('div', 'rec-head');
+  head.append(el('div', 'crumb'), el('h3', '', 'Edit mission record'));
+  head.firstChild.append(el('b', '', v.project || 'Unknown project'), ' · Stardate ' + (v.stardate || '—'));
+  const form = el('form', 'ed');
+  const field = (label, node, hint) => { const l = el('label', '', label); if (hint) l.append(el('small', '', hint)); l.append(node); return l; };
+  const inp = (val, max) => { const i = el('input'); i.value = val || ''; if (max) i.maxLength = max; return i; };
+  const area = (val, cls) => { const t = el('textarea', cls); t.value = val || ''; return t; };
+  const fTitle = inp(v.summary, 140), fReport = area(v.report, 'big'), fSteps = area((v.steps || []).join('\n'));
+  form.append(field('Title', fTitle), field('Summary', fReport), field('Steps taken', fSteps, 'One per line'));
+  let fOut, fDel, fOpen, fNext;
+  if (v.closed) {
+    fOut = el('select'); ['complete', 'partial', 'abandoned'].forEach(o => { const op = el('option', '', o); op.value = o; if ((c.outcome || 'complete') === o) op.selected = true; fOut.append(op); });
+    fDel = area((c.delivered || []).join('\n')); fOpen = area((c.openItems || []).join('\n')); fNext = inp(c.nextStep === 'None' ? '' : c.nextStep, 300);
+    const pair = el('div', 'pair'); pair.append(field('Delivered', fDel, 'One per line'), field('Open items', fOpen, 'One per line'));
+    form.append(field('Outcome', fOut), pair, field('Next step', fNext));
+  }
+  const state = el('span', 'toast'); state.setAttribute('role', 'status');
+  const acts = el('div', 'actions');
+  const save = el('button', 'btn p', 'Save'); save.type = 'submit';
+  acts.append(save, btn('ghost', 'Cancel', () => { editing = null; renderRecord(); }), state);
+  form.append(acts);
+  form.onsubmit = async e => {
+    e.preventDefault(); if (!db) return;
+    const patch = { summary: fTitle.value.trim() || v.summary || 'Mission', report: fReport.value.trim(), steps: lines(fSteps.value), editedAt: Date.now() };
+    if (v.closed) patch.closure = { ...c, outcome: fOut.value, delivered: lines(fDel.value), openItems: lines(fOpen.value), nextStep: fNext.value.trim() || 'None' };
+    save.disabled = true; state.className = 'toast saving'; state.textContent = 'Saving…';
+    try { await db.collection('missions').doc(v.id).update(patch); editing = null; renderRecord(); }
+    catch { save.disabled = false; state.className = 'toast err'; state.textContent = 'Not saved. You may only have view access, or the connection dropped.'; }
+  };
+  form.onkeydown = e => { if (e.key === 'Escape') { editing = null; renderRecord(); } };
+  rec.append(head, form);
+  host.replaceChildren(rec);
+  fTitle.focus();
+}
+
+function renderRecord() {
+  const host = $('mis-rec'), v = missions.find(m => m.id === misSel);
+  if (!v) { editing = null; host.replaceChildren(); return; }
+  // Live updates must not wipe what's being typed
+  if (editing === v.id) { if (!host.querySelector('form.ed')) renderEditor(v); return; }
+  editing = null;
+  const rec = el('article', 'rec'); rec.setAttribute('aria-label', 'Mission record');
+  const head = el('div', 'rec-head'), recTools = el('div', 'rec-tools');
+  if (db) recTools.append(btn('p', 'Edit', () => { editing = v.id; renderEditor(v); }));
+  if (downloads) recTools.append(btn('o', 'Export', () => exportMd(`mission-${slug(v.project)}-${v.stardate || v.id}.md`, missionMd(v))));
+  recTools.append(btn('ghost', 'Hide record', () => { misSel = null; store.set('mis-sel', null); renderMissions(missions); }),
+    armDelete('Delete mission', () => deleteMission(v)));
+  head.append(el('div', 'crumb'), el('h3', '', v.summary || 'Mission' + (v.project ? ' in ' + v.project : '')), recTools);
+  head.firstChild.append(el('b', '', v.project || 'Unknown project'), ' · Stardate ' + (v.stardate || '—') + (v.cwd ? ' · ' + v.cwd : ''));
+  rec.append(head);
+
+  const end = v.endedAt || null, w = v.warpCore || {};
+  const dates = el('div', 'facts');
+  dates.append(fact('Start date', when(v.at)), fact('End date', end ? when(end) : 'In progress', end ? '' : 'hot'), fact('Mission length', end ? span(end - v.at) : '—'));
+  rec.append(dates);
+
+  const core = el('div', 'facts');
+  core.append(
+    fact('Turns', String(v.turns || 0)),
+    fact('Station orders', w.orders != null ? String(w.orders) : '—'),
+    fact('Time at warp', w.warpMs != null ? span(w.warpMs) : '—'),
+    fact('Peak context', (w.peakContext ?? v.peakContext) != null ? (w.peakContext ?? v.peakContext) + '%' : '—', (w.peakContext ?? v.peakContext) >= 85 ? 'bad' : ''),
+    fact('Sensor sweeps', w.scans != null ? String(w.scans) : '—'),
+    fact('Files changed', v.files ? String(v.files.length) : '—'),
+    fact('Green builds', w.greenBuilds != null ? String(w.greenBuilds) : '—', w.greenBuilds ? 'good' : ''),
+    fact('Last build', w.lastBuild ? (w.lastBuild === 'pass' ? 'Pass' : 'Hull breach') : '—', w.lastBuild === 'fail' ? 'bad' : w.lastBuild === 'pass' ? 'good' : ''),
+    fact('Commits', w.commits != null ? String(w.commits) : '—'),
+    fact('Red alerts', String(v.redAlerts || 0), v.redAlerts ? 'bad' : ''),
+    fact('Handoffs', String(v.handoffs || 0)));
+  rec.append(block('Warp core report', 'wc', core));
+
+  const story = [];
+  story.push(v.report ? el('p', '', v.report) : el('p', 'hint', 'No summary yet. Run the hub sync from this mission’s chat to have the computer write one.'));
+  if (Array.isArray(v.steps) && v.steps.length) { const ol = el('ol'); v.steps.forEach(x => ol.append(el('li', '', x))); story.push(ol); }
+  rec.append(block('Summary and steps taken', 'sm', ...story));
+
+  // Closure report: written by the mod's Close mission, so the chat can be archived
+  const c = v.closure || { outcome: 'complete' };
+  {
+    const body = [];
+    const top = el('div'); top.style.cssText = 'display:flex;gap:10px;align-items:center;flex-wrap:wrap';
+    const oc = ['complete', 'partial', 'abandoned'].includes(c.outcome) ? c.outcome : 'complete';
+    top.append(el('span', 'outcome ' + oc, oc), el('span', 'hint', 'Closed ' + when(v.closedAt || v.endedAt)));
+    body.push(top);
+    const list = (title, items) => { if (!Array.isArray(items) || !items.length) return; body.push(el('div', 'cl-sub', title)); const ul = el('ul', 'cl-list'); items.forEach(x => ul.append(el('li', '', String(x)))); body.push(ul); };
+    list('Delivered', c.delivered);
+    list('Open items', c.openItems);
+    if (c.nextStep && c.nextStep !== 'None') { body.push(el('div', 'cl-sub', 'Next step')); body.push(el('p', '', c.nextStep)); }
+    rec.append(block('Closure report', 'cl', ...body));
+  }
+
+  const grid = el('div', 'rec-grid');
+  grid.append(
+    block('Models used', '', chips(v.models, 'm', 'Not recorded for this mission.')),
+    block('Plugins used', '', chips(v.plugins, 'p', 'Not recorded for this mission.')),
+    block('Skills loaded', '', chips(v.skills, 's', 'None loaded.')));
+  if (v.agents?.length) grid.append(block('Away teams sent', '', chips(v.agents, 's', '')));
+  if (v.mcpServers?.length) grid.append(block('Connectors', '', chips(v.mcpServers, 'p', '')));
+  const tools = Object.entries(v.tools || {}).sort((a, b) => b[1] - a[1]);
+  grid.append(block('Stations used', '', chips(tools.slice(0, 14), '', 'Not recorded for this mission.')));
+  rec.append(grid);
+
+  const shots = (v.moments || []).filter(x => x && typeof x.url === 'string' && safeUrl(x.url));
+  if (shots.length) {
+    const g = el('div', 'shots');
+    shots.forEach(x => { const a = el('button'); a.type = 'button';
+      const img = el('img'); img.src = x.url; img.alt = x.caption || 'Mission moment'; img.loading = 'lazy';
+      a.append(img, el('span', 'c', x.caption || 'Moment'), el('span', 'k', (x.at ? when(x.at) : '') + (x.source ? ' · ' + x.source : '')));
+      a.onclick = () => openViewer({ url: x.url, name: x.caption || 'Moment', type: 'image/png' });
+      g.append(a); });
+    rec.append(block('Moments', 'mo', g));
+  }
+
+  const files = v.files || [];
+  if (files.length) {
+    const ul = el('ul', 'files'), base = v.cwd ? v.cwd.replace(/\/$/, '') + '/' : '';
+    files.forEach(f => { const li = el('li'); if (base && f.startsWith(base)) li.append(el('span', '', './'), f.slice(base.length)); else li.append(f); ul.append(li); });
+    rec.append(block('Files changed', 'fl', ul));
+  } else rec.append(block('Files changed', 'fl', el('p', 'hint', v.files ? 'No files changed.' : 'Not recorded for this mission.')));
+  host.replaceChildren(rec);
+}
+
+(async () => {
+  const status = $('status');
+  window.claude?.use?.('downloads').then(d => { downloads = d; $('b-xall').hidden = !d || !missions.length; renderRecord(); }).catch(() => {});
+  db = await window.claude?.use?.('db');
+  if (!db) { status.textContent = 'Ship’s records are offline in this view. Sign in to claude.ai to see them.'; $('tree').replaceChildren(el('div', 'none', 'Notebook is offline in this view.')); return; }
+  ['b-proj', 'b-fold', 'b-note'].forEach(id => $(id).disabled = false);
+  status.textContent = 'Linked to ship’s records. Updates arrive live.';
+  const fail = () => { status.textContent = 'Lost contact with ship’s records. Reload to reconnect.'; };
+  const nb = k => s => { S[k] = docs(s); renderTree(); renderPane(); };
+  db.collection('log').orderBy('at', 'desc').limit(300).onSnapshot(nb('log'), fail);
+  db.collection('notes').orderBy('updated', 'desc').limit(500).onSnapshot(nb('notes'), fail);
+  db.collection('folders').orderBy('at').limit(300).onSnapshot(nb('folders'), fail);
+  db.collection('projects').orderBy('at').limit(100).onSnapshot(nb('projects'), fail);
+  db.collection('pins').orderBy('at', 'desc').limit(300).onSnapshot(s => { S.pins = docs(s); refreshPins(); }, fail);
+  window.claude?.use?.('assets').then(a => { assets = a; refreshPins(); }).catch(() => {});
+  db.collection('crew').orderBy('order').limit(50).onSnapshot(s => { S.crew = docs(s); renderCrew(S.crew); renderTree(); }, fail);
+  db.collection('missions').orderBy('at', 'desc').limit(100).onSnapshot(s => renderMissions(docs(s)), fail);
+})();
+</script>

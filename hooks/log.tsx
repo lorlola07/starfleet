@@ -2,16 +2,20 @@ import type { EngineInterface, On } from 'claude-code'
 
 import type { CrewMember, LogEntry, Mission } from '../types'
 import { scanCrew } from './crew'
-import { HUB_URL, basename, serial, stardate } from './shared'
+import { HUB_TEMPLATE, basename, isHubUrl, serial, stardate } from './shared'
 import { LCARS } from './theme'
 import { readVoyage } from './voyage'
 
 // Captain's log quick capture, mission history, and the records tool the computer reads.
 // The log and mission are kept in $.store per session (keys end in the session id);
-// only the newest KEEP_SESSIONS sessions are kept.
+// only the newest KEEP_SESSIONS sessions are kept whole; older sessions' entries move to the archive.
 
 const LOG_PANE = 'starfleet-log'
 const KEEP_SESSIONS = 20
+const ARCHIVE_KEY = 'logArchive'
+const ARCHIVE_MAX = 1000
+// Keys kept per session: log:<id>, missions:<id>, voyage:<id>, lastPrompt:<id>
+const PER_SESSION = /^(log|missions|voyage|lastPrompt):(.+)$/
 
 let draftKey = 0
 
@@ -29,31 +33,47 @@ async function missionKey($: EngineInterface) {
   return `missions:${await $.session.id()}`
 }
 
-// Remember this session and drop the log and mission of sessions past the newest KEEP_SESSIONS
+// Remember this session. A session past the newest KEEP_SESSIONS gives its log entries to the
+// archive (never dropped unseen) and its mission, voyage and last order are cleared, so the store stays small
+const trackLock = serial()
+
 async function trackSession($: EngineInterface) {
-  const id = await $.session.id()
-  const saved = await $.store.get('logSessions')
-  const ids = Array.isArray(saved) ? (saved as string[]) : []
-  if (ids[0] === id) return
-  const kept = [id, ...ids.filter(s => s !== id)]
-  for (const old of kept.slice(KEEP_SESSIONS)) {
-    await $.store.delete(`log:${old}`)
-    await $.store.delete(`missions:${old}`)
-    await $.store.delete(`voyage:${old}`)
-  }
-  await $.store.set('logSessions', kept.slice(0, KEEP_SESSIONS))
+  await trackLock(async () => {
+    const id = await $.session.id()
+    const saved = await $.store.get('logSessions')
+    const ids = Array.isArray(saved) ? (saved as string[]) : []
+    if (ids[0] === id) return
+    const kept = [id, ...ids.filter(s => s !== id)].slice(0, KEEP_SESSIONS)
+    await $.store.set('logSessions', kept)
+    // Any session's keys not kept, including ones from before this tracking existed.
+    // Cleanup never blocks the log write that called it
+    const keys = await $.store.keys().catch(() => [] as string[])
+    const stale = keys.filter(k => {
+      const m = PER_SESSION.exec(k)
+      return m && !kept.includes(m[2]!)
+    })
+    const archived = (await Promise.all(stale.filter(k => k.startsWith('log:')).map(async k => parseLog(await $.store.get(k))))).flat()
+    if (archived.length) await archiveEntries($, archived)
+    for (const k of stale) await $.store.delete(k)
+  })
+}
+
+async function archiveEntries($: EngineInterface, entries: LogEntry[]) {
+  const byId = new Map<string, LogEntry>()
+  for (const e of [...entries, ...parseLog(await $.store.get(ARCHIVE_KEY))]) if (!byId.has(e.id)) byId.set(e.id, e)
+  await $.store.set(ARCHIVE_KEY, [...byId.values()].sort((a, b) => b.at - a.at).slice(0, ARCHIVE_MAX))
 }
 
 export async function readLog($: EngineInterface): Promise<LogEntry[]> {
   return parseLog(await $.store.get(await logKey($)))
 }
 
-// Every kept session's entries, newest first: what the briefing reads for earlier missions
+// Every kept session's entries and the archive, newest first: what the briefing and Save read
 export async function readRecentLogs($: EngineInterface): Promise<LogEntry[]> {
   const saved = await $.store.get('logSessions')
   const ids = Array.isArray(saved) ? (saved as string[]) : []
   const logs = await Promise.all(ids.map(async id => parseLog(await $.store.get(`log:${id}`))))
-  return logs.flat().sort((a, b) => b.at - a.at)
+  return [...logs.flat(), ...parseLog(await $.store.get(ARCHIVE_KEY))].sort((a, b) => b.at - a.at)
 }
 
 function parseLog(saved: unknown): LogEntry[] {
@@ -155,20 +175,43 @@ function pluginsOf(m: Mission): { plugins: string[]; mcpServers: string[] } {
 }
 
 export async function saveMarkdown($: EngineInterface) {
-  const log = await readLog($)
+  const log = await readRecentLogs($)
   const lines = ['# Captain’s log', '', ...log.map(e => `- **${e.stardate}**${e.project ? ` · ${e.project}` : ''}: ${e.text}`), '']
   await $.fs.write('captains-log.md', lines.join('\n'))
   $.ui.toast(`📓 Saved ${log.length} entries to captains-log.md`)
 }
 
 export async function sendClosure($: EngineInterface) {
-  void $.prompt.submit({ text: closurePrompt(await $.clock.now()) }).catch(() => {})
+  void $.prompt.submit({ text: await closurePrompt($, await $.clock.now()) }).catch(() => {})
   $.ui.toast('🖖 Filing the closure report with Starfleet Command…')
 }
 
-export function syncPrompt(): string {
+// The captain's own hub, published on the first sync or set with /hub <url>; none until then
+export async function hubUrl($: EngineInterface): Promise<string | undefined> {
+  const saved = await $.store.get('hubUrl')
+  return typeof saved === 'string' && isHubUrl(saved) ? saved : undefined
+}
+
+export async function setHubUrl($: EngineInterface, url: string | undefined) {
+  if (url) await $.store.set('hubUrl', url.replace(/\/$/, ''))
+  else await $.store.delete('hubUrl')
+}
+
+// How a sync prompt opens: the saved hub, or steps that publish the captain's own hub first
+async function hubOpening($: EngineInterface, what: string): Promise<string[]> {
+  const hub = await hubUrl($)
+  if (hub) return [`${what} (${hub}).`]
   return [
-    `Sync the Starfleet Command hub artifact (${HUB_URL}).`,
+    'The captain has no Starfleet Command hub yet, so publish one first:',
+    `- Publish the file ${$.plugin.root}/${HUB_TEMPLATE} as a new private Artifact, as it is (no redesign), with icon "star" and the capabilities assets, db and downloads, each {}.`,
+    '- Call the starfleet_set_hub tool with the new artifact\'s URL.',
+    `Then: ${what} (the hub you just published).`,
+  ]
+}
+
+export async function syncPrompt($: EngineInterface): Promise<string> {
+  return [
+    ...(await hubOpening($, 'Sync the Starfleet Command hub artifact')),
     'Call the starfleet_records tool, then write its rows to the artifact database with ArtifactData in one batch:',
     '- collection "log": one doc per entry, doc id = entry id, fields { stardate, text, at, project }. First list collection "logDeleted": skip every entry whose id is a doc there (the captain deleted it in the hub)',
     '- collection "crew": one doc per crew member, doc id = the sprite key, fields { name, sprite, project, deck, status, order } where order is its position in the list',
@@ -184,9 +227,9 @@ export function syncPrompt(): string {
 }
 
 // The closure report: a full sync, then this session's mission finished off so the chat can be archived
-export function closurePrompt(now: number): string {
+export async function closurePrompt($: EngineInterface, now: number): Promise<string> {
   return [
-    syncPrompt().replace(/Reply in one line with what was synced\.$/, ''),
+    (await syncPrompt($)).replace(/Reply in one line with what was synced\.$/, ''),
     '',
     'This is the CLOSURE REPORT for this session\'s mission: the captain will archive this chat next, so write it from the whole conversation.',
     'Close mission is the only thing that ends the project. Start no new chat to continue it.',
@@ -201,9 +244,9 @@ export function closurePrompt(now: number): string {
 }
 
 // The crew alone, sent after a rescan
-export function crewSyncPrompt(): string {
+export async function crewSyncPrompt($: EngineInterface): Promise<string> {
   return [
-    `Sync the crew roster to the Starfleet Command hub artifact (${HUB_URL}).`,
+    ...(await hubOpening($, 'Sync the crew roster to the Starfleet Command hub artifact')),
     'Call the starfleet_records tool, then with ArtifactData in one batch write collection "crew": one doc per crew member, doc id = the sprite key, fields { name, sprite, project, deck, status, order } where order is its position in the list.',
     'Delete crew docs whose ids are no longer in the records. Touch no other collection. Reply in one line naming who is aboard.',
   ].join('\n')
@@ -217,7 +260,7 @@ export async function recordsJson($: EngineInterface): Promise<string> {
     await scanCrew($).catch(() => {})
     crew = ((await $.store.get('crew')) ?? []) as CrewMember[]
   }
-  return JSON.stringify({ hubUrl: HUB_URL, sessionId: await $.session.id(), log: await readLog($), crew, missions: await missionRecords($) }, null, 1)
+  return JSON.stringify({ hubUrl: (await hubUrl($)) ?? null, sessionId: await $.session.id(), log: await readLog($), crew, missions: await missionRecords($) }, null, 1)
 }
 
 // This session's missions with the voyage folded in: the warp core report and the files changed
@@ -256,9 +299,38 @@ export async function logSessionStart($: EngineInterface) {
     description: 'Read the captain’s Starfleet records kept by the starfleet mod: this session’s captain’s log entries and mission, the crew roster (their code projects), mission history, and the hub artifact URL. Use when asked about the captain’s log, notes, crew, missions, or to sync the hub.',
     inputSchema: { type: 'object', properties: {} },
   })
+  await $.tool.register({
+    name: 'starfleet_set_hub',
+    description: 'Save the URL of the captain’s Starfleet Command hub artifact (a claude.ai artifact link), so later syncs write to it. Call it right after publishing the hub during a sync.',
+    inputSchema: { type: 'object', properties: { url: { type: 'string', description: 'The hub artifact’s claude.ai URL' } }, required: ['url'] },
+  })
+  await $.command.register({ name: 'hub', description: 'Starfleet Command hub: /hub shows its link, /hub <url> sets it, /hub clear forgets it', immediate: true, argumentHint: '<url> | clear' })
 }
 
 export function registerLog(on: On) {
+  on('tool.call', { tool: 'mcp__starfleet__starfleet_set_hub' }, async ($, e) => {
+    const url = String((e as { url?: unknown }).url ?? '').trim()
+    if (!isHubUrl(url)) return { result: `Not saved: "${url}" is not a claude.ai artifact URL. Pass the URL the Artifact tool returned.` }
+    await setHubUrl($, url)
+    $.ui.invalidate('ui.render')
+    return { result: `Hub saved: ${url}` }
+  })
+
+  on('command.run', { command: 'hub' }, async ($, e) => {
+    const arg = e.args.trim()
+    if (arg === 'clear') {
+      await setHubUrl($, undefined)
+      return { text: 'Hub forgotten. The next sync publishes a new one.' }
+    }
+    if (arg) {
+      if (!isHubUrl(arg)) return { text: 'That is not a claude.ai artifact link. Use /hub https://claude.ai/artifact/…' }
+      await setHubUrl($, arg)
+      return { text: `Starfleet Command hub set: ${arg}` }
+    }
+    const hub = await hubUrl($)
+    return { text: hub ? `Starfleet Command hub: ${hub}` : 'No hub yet. Press Sync in /log or /starfleet and Claude publishes your own.' }
+  })
+
   on('command.run', { command: 'closure' }, async $ => {
     await sendClosure($)
     return {}
@@ -279,6 +351,7 @@ export function registerLog(on: On) {
     const el = $.ui.resolve(e)
     const { Box, Text, Button, Link } = el
     const log = await readLog($)
+    const hub = await hubUrl($)
     return (
       <Box flexDirection="column" rowGap={1} padding="sm">
         <Box flexDirection="row" columnGap={1}>
@@ -315,7 +388,7 @@ export function registerLog(on: On) {
         </Box>
         <Box flexDirection="row" columnGap={2} flexWrap="wrap">
           <Button key="sync" label="Sync to hub (s)" hotkey="s" variant="primary" onPress={() => {
-            void $.prompt.submit({ text: syncPrompt() }).catch(() => {})
+            void syncPrompt($).then(text => $.prompt.submit({ text })).catch(() => {})
             $.ui.toast('📡 Transmitting records to Starfleet Command…')
           }} />
           <Button key="md" label="Save as .md (m)" hotkey="m" onPress={() => saveMarkdown($)} />
@@ -324,7 +397,7 @@ export function registerLog(on: On) {
             void $.ui.close({ id: LOG_PANE }).catch(() => {})
           }} />
         </Box>
-        <Link href={HUB_URL} label="Open Starfleet Command →" />
+        {hub ? <Link href={hub} label="Open Starfleet Command →" /> : <Text dimColor>No hub yet. Sync publishes your own Starfleet Command hub.</Text>}
       </Box>
     )
   })

@@ -32,6 +32,8 @@ function engine(on: any, run?: (_: unknown, e: { argv: string[] }) => unknown, l
   on('ui.open', (_: unknown, e: { id: string }) => (opened.push(e.id), { value: { isPlaced: true } }))
   on('store.get', (_: unknown, e: { key: string }) => ({ value: store[e.key] }))
   on('store.set', (_: unknown, e: { key: string; value: unknown }) => { store[e.key] = e.value; return { value: undefined } })
+  on('store.delete', (_: unknown, e: { key: string }) => { delete store[e.key]; return { value: undefined } })
+  on('store.keys', () => ({ value: Object.keys(store) }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 150000, window: 200000, percent: 75 }, rateLimits: [] } }))
   on('session.cwd', () => ({ value: '/Users/cap/MOD' }))
   on('session.id', () => ({ value: sessionId }))
@@ -202,7 +204,7 @@ test('projects archived in the app leave the decks', async ($, on) => {
   expect(crew.map(c => c.path)).toEqual(['/Users/cap/MOD'])
 })
 
-test('the shields block forced rm and push in any spelling, and let safe ones through', async ($, on) => {
+test('the shields deny a destructive Bash call with the reason, and let safe ones through', async ($, on) => {
   engine(on)
   on('tool.call', () => ({ result: 'ok' }))
   on('audio.play', () => ({ value: undefined }))
@@ -210,7 +212,8 @@ test('the shields block forced rm and push in any spelling, and let safe ones th
   const tools = $.tool as unknown as { call: (input: object) => Promise<{ deny?: string }> }
   const blocked = ['rm -rf build', 'rm -fr build', 'rm -r -f build', 'rm --recursive --force x', 'cd a && rm -Rf b', 'git push -f origin main', 'git push --force-with-lease', 'git reset --hard']
   for (const command of blocked) expect((await tools.call({ tool: 'Bash', command }))?.deny).toBeTruthy()
-  for (const command of ['rm -r build', 'rm -f a.txt', 'git push origin main', 'ls -rf'])
+  expect((await tools.call({ tool: 'Bash', command: 'git reset --hard' }))?.deny).toContain('(git reset --hard)')
+  for (const command of ['rm -r build', 'rm -f a.txt', 'git push origin main', 'ls -rf', 'echo "rm -rf x"'])
     expect((await tools.call({ tool: 'Bash', command }))?.deny).toBeFalsy()
 })
 
@@ -401,4 +404,96 @@ test('a deck another chat posts moves that project on every console', async ($, 
   // Nine days idle would put it in quarters; the live post puts it in engineering
   expect((await ui.find({ type: 'Text', text: /\bapp\b/ }))?.text).toContain('engineering')
   await ui.unmount()
+})
+
+test('each captain gets their own hub: the first sync publishes it, then syncs go there', async ($, on) => {
+  const store = engine(on)
+  on('audio.play', () => ({ value: undefined }))
+  const sent: string[] = []
+  on('prompt.submit', (_: unknown, e: { text: string }) => { sent.push(e.text); return { text: e.text } })
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const run = $.command.run as (input: { command: string; args: string }) => Promise<{ text?: string }>
+
+  // No hub yet: the closure report publishes one from the bundled template first, and names no one else's hub
+  expect((await run({ command: 'hub', args: '' })).text).toContain('No hub yet')
+  const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
+  await ui.press({ key: 'closure' })
+  await new Promise(done => setTimeout(done, 20))
+  const first = sent.find(t => t.includes('CLOSURE REPORT'))!
+  expect(first).toContain('assets/hub.html')
+  expect(first).toContain('starfleet_set_hub')
+  expect(first).not.toMatch(/claude\.ai\/artifact/)
+
+  // Claude saves the new hub; anything but an artifact link is refused
+  const setHub = (url: string) => callTool($, { tool: 'mcp__starfleet__starfleet_set_hub', url }) as Promise<{ result: string }>
+  expect((await setHub('https://evil.example/x')).result).toContain('Not saved')
+  expect(store.hubUrl).toBeUndefined()
+  expect((await setHub('https://claude.ai/artifact/MyOwnHub123')).result).toContain('Hub saved')
+
+  // Later syncs go to that hub, and the records name it
+  sent.length = 0
+  await ui.press({ key: 'closure' })
+  await new Promise(done => setTimeout(done, 20))
+  const second = sent.find(t => t.includes('CLOSURE REPORT'))!
+  expect(second).toContain('https://claude.ai/artifact/MyOwnHub123')
+  expect(second).not.toContain('assets/hub.html')
+  const records = JSON.parse(String((await callTool($, { tool: 'mcp__starfleet__starfleet_records' }) as { result: unknown }).result))
+  expect(records.hubUrl).toBe('https://claude.ai/artifact/MyOwnHub123')
+  await ui.unmount()
+
+  // /hub sets, shows and forgets it
+  expect((await run({ command: 'hub', args: 'not a link' })).text).toContain('not a claude.ai artifact link')
+  expect((await run({ command: 'hub', args: 'https://claude.ai/code/artifact/abc-123' })).text).toContain('hub set')
+  expect((await run({ command: 'hub', args: '' })).text).toContain('abc-123')
+  await run({ command: 'hub', args: 'clear' })
+  expect(store.hubUrl).toBeUndefined()
+})
+
+test('an old session gives its log to the archive, and its other keys are cleared', async ($, on) => {
+  const store = engine(on)
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const run = $.command.run as (input: { command: string; args: string }) => Promise<unknown>
+  await run({ command: 'log', args: 'note from the first session' })
+  store['lastPrompt:sess-1'] = { text: 'x'.repeat(100), at: 1 }
+  store['lastPrompt:ghost'] = { text: 'from before tracking', at: 1 }
+  // 20 more sessions push sess-1 out of the kept window
+  for (let i = 0; i < 20; i++) {
+    sessionId = `later-${i}`
+    await run({ command: 'log', args: `note ${i}` })
+  }
+  sessionId = 'sess-1'
+  expect((store.logSessions as string[]).length).toBe(20)
+  expect(store['log:sess-1']).toBeUndefined()
+  expect(store['lastPrompt:sess-1']).toBeUndefined()
+  expect(store['lastPrompt:ghost']).toBeUndefined()
+  // The note is not lost: it sits in the archive, once
+  const archive = store.logArchive as { text: string }[]
+  expect(archive.filter(e => e.text === 'note from the first session').length).toBe(1)
+})
+
+test('make it so approves only the proposed step, in words the captain can see', async ($, on) => {
+  engine(on)
+  on('audio.play', () => ({ value: undefined }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  const sent: { text: string; context?: readonly string[] }[] = []
+  on('prompt.submit', (_: unknown, e: { text: string; context?: readonly string[] }) => { sent.push(e); return { text: e.text } })
+  const suggested: string[] = []
+  on('prompt.suggest', (_: unknown, e: { text: string }) => { suggested.push(e.text); return { isShown: true } })
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+
+  await ($.prompt.submit as (e: { text: string }) => Promise<unknown>)({ text: 'Make it so!' })
+  const order = sent.at(-1)!
+  expect(order.text).toContain('Make it so: Go ahead with the one step you just proposed, and only that step.')
+  expect(order.text).toContain('Ask me first before anything destructive')
+  expect(order.context ?? []).toEqual([])
+
+  // A plain question gets the one-key suggestion; a risky one does not
+  const complete = $.turn.complete as (e: unknown) => Promise<unknown>
+  await complete({ durationMs: 1000, answer: 'The tests pass. Shall I add the README section?', isAborted: false })
+  await new Promise(done => setTimeout(done, 20))
+  expect(suggested).toEqual(['make it so'])
+  await complete({ durationMs: 1000, answer: 'Shall I delete the old branches and force-push?', isAborted: false })
+  await new Promise(done => setTimeout(done, 20))
+  expect(suggested).toEqual(['make it so'])
 })

@@ -8,6 +8,7 @@ import { RANKS, errText, hashOf, pipsSvg, rankOf } from './shared'
 import { LCARS, hail } from './theme'
 import { crewSessionStart, crewTurnComplete, registerCrew } from './crew'
 import { logSessionStart, missionTurnComplete, recordsJson, registerLog } from './log'
+import { hostileReason } from './shields'
 import { opsSessionStart, opsTurnComplete, opsTurnStart, registerOps, setRedAlert } from './ops'
 import { CAPTAIN_PROMPT, registerTakeover } from './takeover'
 
@@ -71,28 +72,11 @@ const STARSHIP_ASCII = `                    ___________________
    ======|  |=/`
 
 
-// Bash commands the shields refuse: a forced push (--force, --force-with-lease, -f) or a hard reset
-// (options may sit between git and push: git -C dir push -f, git -c x=y push --force; +main is a forced refspec)
-const HOSTILE = [/\bgit\b[^;&|]*\spush\b[^;&|]*(\s--force|\s-[a-zA-Z]*f\b|\s\+\S)/, /\bgit\b[^;&|]*\sreset\s+--hard\b/]
-
-// rm that is both recursive and forced, whatever the flag order or spelling (-rf, -fr, -r -f, --recursive --force)
-function isForcedRm(command: string): boolean {
-  return command.split(/;|&&|\|\||\|/).some(part => {
-    const words = part.trim().split(/\s+/)
-    const at = words.findIndex(w => w === 'rm' || w.endsWith('/rm'))
-    if (at < 0) return false
-    const flags = words.slice(at + 1).filter(w => w.startsWith('-'))
-    const short = flags.filter(f => !f.startsWith('--')).join('')
-    const isRecursive = /[rR]/.test(short) || flags.includes('--recursive')
-    const isForced = short.includes('f') || flags.includes('--force')
-    return isRecursive && isForced
-  })
-}
-
-function isHostile(command: string): boolean {
-  return isForcedRm(command) || HOSTILE.some(rx => rx.test(command))
-}
 const MAKE_IT_SO = /^\s*(make it so|engage)[.!]*\s*$/i
+// What "make it so" stands for, written into the captain's own message so they see what Claude is told
+export const MAKE_IT_SO_ORDER = 'Go ahead with the one step you just proposed, and only that step. Ask me first before anything destructive or anything beyond it.'
+// A question about one of these gets no one-key "make it so" suggestion: the captain should answer it in words
+const RISKY_ASK = /\b(force[- ]?push|push --force|delete|remove|drop|reset|wipe|overwrite|discard|destroy|deploy|publish|merge)\b/i
 
 const PLANETS = ['Class M, breathable atmosphere', 'Gas giant, 14 moons', 'Class L, dense forests', 'Ice world, subsurface ocean', 'Barren rock, trace dilithium']
 const LIFE = ['No life signs', '3 life signs, humanoid', 'Thousands of life signs, non-humanoid', 'One life sign. It is… a cat.', 'Faint signs, possibly cloaked']
@@ -152,10 +136,11 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // 1. Shields: block destructive Bash commands before they run
+  // 1. Shields: refuse the common destructive Bash commands (shields.ts says what they catch)
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    if (!isHostile(e.command)) return next(e)
-    const deny = `🛡️ Starfleet shields: "${e.command.slice(0, 60)}" was blocked by Tactical. Ask the captain to run it themselves.`
+    const reason = hostileReason(String(e.command ?? ''))
+    if (!reason) return next(e)
+    const deny = `🛡️ Starfleet shields: "${e.command.slice(0, 60)}" was blocked by Tactical (${reason}). Ask the captain to run it themselves.`
     // The block holds even if the fanfare fails
     try {
       await bumpRecord($, 'blocked')
@@ -189,14 +174,13 @@ export const register: Register = on => {
   // The captain's records, read by Claude through the starfleet_records tool (log.tsx builds them)
   on('tool.call', { tool: 'mcp__starfleet__starfleet_records' }, async $ => ({ result: await recordsJson($) }))
 
-  // 3. "Make it so": keep the words, slip Claude extra context the person never sees
+  // 3. "Make it so": approve the one step Claude proposed, spelled out in the message itself (nothing hidden)
   on('prompt.submit', async ($, e, next) => {
     const isMakeItSo = !e.command && !e.isMeta && MAKE_IT_SO.test(e.text)
     // "Make it so" is a go-ahead, not an order worth reissuing; and a store hiccup never blocks the prompt
     if (!isMakeItSo) await rememberOrder($, e).catch(() => {})
     if (!isMakeItSo) return next(e)
-    const order = 'The captain approves. Proceed with the plan or next step you proposed in your last reply, without asking again.'
-    return next({ ...e, context: [...(e.context ?? []), order] })
+    return next({ ...e, text: `${e.text.trim().replace(/[.!]*$/, '')}: ${MAKE_IT_SO_ORDER}` })
   })
 
   // 4. Captain mode: add a section to Claude's system prompt
@@ -284,7 +268,7 @@ export const register: Register = on => {
     if (seconds >= 60 && !e.isAborted) {
       void $.ui.notify(`The away team has returned after ${seconds}s.`, { title: '🖖 Starfleet' }).catch(() => {})
     }
-    if (!e.isAborted && /\?\s*$|\bshall I\b|\bwant me to\b/i.test(e.answer)) {
+    if (!e.isAborted && /\?\s*$|\bshall I\b|\bwant me to\b/i.test(e.answer) && !RISKY_ASK.test(e.answer.slice(-400))) {
       void $.prompt.suggest({ text: 'make it so' }).catch(() => {})
     }
     return next(e)
