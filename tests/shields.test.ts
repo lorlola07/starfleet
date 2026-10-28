@@ -23,9 +23,14 @@ test('shields catch destructive commands however they are written', async () => 
     'ssh host rm -rf x', "ssh host 'git push -f'", 'watch "rm -rf x"', 'su -c "rm -rf x"', 'env -S "rm -rf x"',
     // ANSI-C quoting
     "$'\\x72\\x6d' -rf x", "$'rm' -rf x",
-    // a here-document's body is judged when a shell reads it: directly, wrapped, or through a pipe
+    // a here-document's body is judged unless only text readers are on its line: a shell, wrapped or
+    // piped into, eval, exec, ., or a pipe that carries on past the body
     'bash <<EOF\nrm -rf x\nEOF', 'sudo bash <<EOF\nrm -rf x\nEOF', 'cat <<EOF | bash\nrm -rf x\nEOF',
     "bash <<'EOF'\ngit reset --hard\nEOF", 'zsh <<-EOF\n\tgit push -f\n\tEOF', 'source /dev/stdin <<EOF\nrm -rf x\nEOF',
+    '. /dev/stdin <<EOF\nrm -rf x\nEOF', 'eval "$(cat)" <<EOF\nrm -rf x\nEOF', 'exec bash <<EOF\nrm -rf x\nEOF',
+    "cat <<'EOF' |\nrm -rf x\nEOF\nbash", "cat <<'EOF' &&\nrm -rf x\nEOF\nbash",
+    // a << in ${…} is never a here-document, so the next line is still judged
+    'echo ${x:-<<E}\nrm -rf x\nE', 'echo "${x}" ${y:-<<E}\ngit reset --hard\nE',
     // a << in arithmetic is a shift, not a here-document, so the next line is still judged
     '(( y = 1<<2 ))\nrm -rf x\n2', 'echo $[1<<2]\nrm -rf x\n2', 'x=$((1<<2))\nrm -rf x', '((cd a; rm -rf x))',
     '(( $(rm -rf x) ))',
@@ -56,6 +61,8 @@ test('shields let ordinary commands through, even ones that mention danger', asy
     "cat <<\"EOF\" > a.md\n$(rm -rf x)\nEOF",
     "cat <<'A' > a.md && cat <<'B' > b.md\ngit push -f\nA\nrm -rf ~\nB",
     "grep x <<<'rm -rf x'",
+    "tee a.md <<'EOF'\ngit push -f\nEOF", "cat > a.md <<'EOF'\nset ${HOME} aside\nrm -rf ~\nEOF",
+    'rm -r ${HOME:-x}/build',
   ]
   for (const command of text) expect([command, hostileReason(command)]).toEqual([command, undefined])
   // What follows a here-document is judged too

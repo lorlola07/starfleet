@@ -9,9 +9,9 @@
 
 const MAX_DEPTH = 4
 
-// A here-document: its body, whether its delimiter was quoted (<<'EOF': the shell expands nothing in
-// it), and the segments of the line that started it (whoever reads the body)
-type HereDoc = { body: string; quoted: boolean; line: string[][] }
+// A here-document: its body, and whether it is only text: every command on its line reads stdin as
+// data (cat, tee …) and the line doesn't carry on into the next (a trailing | or &&)
+type HereDoc = { body: string; isText: boolean }
 type Parsed = { segments: string[][]; nested: string[]; heredocs: HereDoc[]; outside: string }
 
 // Split a command into segments of unquoted words, and collect the text of every $(…), `…` and <(…),
@@ -24,6 +24,7 @@ export function parse(command: string): Parsed {
   let outside = ''
   let copied = 0
   let lineStart = 0
+  let lineStartAt = 0
   let seg: string[] = []
   let word: string | null = null
   let i = 0
@@ -99,6 +100,9 @@ export function parse(command: string): Parsed {
   // delimiter line. An unquoted body still runs its $(…) and `…`, so those are collected
   const readBodies = () => {
     const line = segments.slice(lineStart)
+    const carriesOn = /[|&]$/.test(command.slice(lineStartAt, i - 1).trimEnd())
+    const isText = !carriesOn && line.length > 0
+      && line.every(words => TEXT_READERS.has(nameOf(words.find(w => !ASSIGNMENT.test(w)) ?? '')))
     for (const doc of pending.splice(0)) {
       const start = i
       const lines: string[] = []
@@ -118,11 +122,12 @@ export function parse(command: string): Parsed {
         }
         word = saved
       }
-      heredocs.push({ body: lines.join('\n'), quoted: doc.quoted, line })
+      heredocs.push({ body: lines.join('\n'), isText })
       outside += command.slice(copied, start)
       copied = i
     }
     lineStart = segments.length
+    lineStartAt = i
   }
 
   while (i < command.length) {
@@ -142,6 +147,26 @@ export function parse(command: string): Parsed {
       const end = command.indexOf("'", i + 1)
       add(command.slice(i + 1, end < 0 ? undefined : end))
       i = end < 0 ? command.length : end + 1
+      continue
+    }
+    // ${ … } is one word, kept as written: a << in it is never a here-document. Any $(…) or `…` inside
+    // still runs, so those are collected
+    if (c === '$' && command[i + 1] === '{') {
+      let end = i + 2
+      for (let depth = 1; end < command.length; end++) {
+        if (command[end] === '\\') { end++; continue }
+        if (command[end] === '{') depth++
+        if (command[end] === '}' && --depth === 0) break
+      }
+      const saved = word
+      for (let j = i + 2; j < end; j++) {
+        if (command[j] === '\\') { j++; continue }
+        const after = substitution(j)
+        if (after !== undefined) j = after - 1
+      }
+      word = saved
+      add(command.slice(i, end + 1))
+      i = end + 1
       continue
     }
     // Arithmetic, (( … )) or $[ … ], is one word: a << in it is a shift, never a here-document. Any
@@ -219,11 +244,10 @@ export function hostileReason(command: string, depth = 0): string | undefined {
     const reason = hostileReason(inner, depth + 1)
     if (reason) return reason
   }
-  // A here-document's body is only text, unless a shell on its line reads it (bash <<EOF, or
-  // cat <<EOF | bash): then every line of it is a command
+  // A here-document's body is judged as commands (fail closed) unless it is only text: a shell, eval,
+  // a wrapper or a pipe on its line could run it
   for (const doc of heredocs) {
-    const toShell = doc.line.some(words => words.some(w => SHELL_READERS.has(nameOf(w))))
-    const reason = toShell ? hostileReason(doc.body, depth + 1) : undefined
+    const reason = doc.isText ? undefined : hostileReason(doc.body, depth + 1)
     if (reason) return reason
   }
   // Each line outside the here-documents on its own too, so a stray quote can't hide the lines after
@@ -271,8 +295,9 @@ const RUNS_STRING = new Set(['su', 'runuser', 'script'])
 const TEXT_ONLY = new Set(['echo', 'printf', 'grep', 'egrep', 'fgrep', 'rg', 'ag', 'cat', 'less', 'more', 'head', 'tail', 'man', 'which', 'type', 'whatis', 'apropos', 'tldr', 'gh', 'jq', 'sed', 'awk', 'wc', 'sort', 'uniq', 'tr', 'cut', 'diff', 'test', '['])
 const JUDGED = new Set(['rm', 'find', 'git'])
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish'])
-// Commands that run a here-document's body as shell commands
-const SHELL_READERS = new Set([...SHELLS, 'source'])
+// Commands that read a here-document as data, never as shell commands. Code piped into another
+// language (python3 - <<EOF) is like a script file: Shields can't see inside it
+const TEXT_READERS = new Set([...TEXT_ONLY, 'tee', 'python', 'python3', 'node', 'ruby', 'perl'])
 
 function nameOf(word: string): string {
   return word.split('/').pop() ?? word

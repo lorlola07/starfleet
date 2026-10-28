@@ -19,7 +19,7 @@
 - Plugin listing details: homepage, repository, keywords and category.
 
 ### Fixed
-- Shields reads a here-document as text unless a shell reads it, so writing a file that mentions a risky command is no longer blocked. A `<<` in arithmetic is a shift, not a here-document.
+- Shields reads a here-document as text when only text readers like `cat` or `tee` take it, so writing a file that mentions a risky command is no longer blocked. Anything else on its line (a shell, `eval`, `.`, a wrapper, a pipe carrying on) still has its body judged. A `<<` in arithmetic or `${…}` is never a here-document.
 - The red alert banner sits at its own height and fits its text.
 - The service record only counts up, and an acknowledged briefing stays gone after a reload.
 - Console drawings fit a narrow pane, and a full deck of crew is never cut off.
