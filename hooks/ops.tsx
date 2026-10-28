@@ -4,9 +4,9 @@ import type { EngineInterface, On } from 'claude-code'
 import type { StationCall } from '../types'
 import { postLiveDeck } from './crew'
 import { bumpMission, missionToolCall } from './log'
-import { TEST_OR_BUILD, deckOfTool, errText, serial, stardate } from './shared'
+import { TEST_OR_BUILD, deckOfTool, errText, projectOf, serial, stardate } from './shared'
 import { updateVoyage } from './voyage'
-import { LCARS } from './theme'
+import { HEAD_COLOR, LCARS } from './theme'
 
 // Session state (the same isCaptainMode value register.tsx reads and writes)
 const isCaptainMode = atom({ plugin: 'starfleet', key: 'isCaptainMode' } as const, false)
@@ -108,11 +108,15 @@ export async function toggleRedAlert($: EngineInterface) {
 
 // A pulsing red frame, drawn as an animated Svg where the surface has one
 export function redAlertSvg(reason: string, width: number): string {
+  const label = `RED ALERT · ${reason.replace(/[<&>]/g, '').toUpperCase().slice(0, 60)}`
+  // Where Antonio isn't loaded the fallback runs wider, so a long label is squeezed to fit, never cut
+  const room = width - 44
+  const fit = label.length * 9.5 > room ? ` textLength="${room}" lengthAdjust="spacingAndGlyphs"` : ''
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} 34" width="${width}" height="34">
 <style>@keyframes p{0%,100%{opacity:.35}50%{opacity:1}}.p{animation:p 1s ease-in-out infinite}@media (prefers-reduced-motion:reduce){.p{animation:none}}</style>
 <rect class="p" x="1.5" y="1.5" width="${width - 3}" height="31" rx="6" fill="#3a0d0d" stroke="#ff3b3b" stroke-width="3"/>
 <circle class="p" cx="18" cy="17" r="6" fill="#ff3b3b"/>
-<text x="32" y="22" font-family="Antonio,Arial Narrow,sans-serif" font-size="15" letter-spacing="1.5" fill="#ffd6d6">RED ALERT · ${reason.replace(/[<&>]/g, '').toUpperCase().slice(0, 60)}</text>
+<text x="32" y="22" font-family="Antonio,Arial Narrow,sans-serif" font-size="15" letter-spacing="1.5" fill="#ffd6d6"${fit}>${label}</text>
 </svg>`
 }
 
@@ -185,11 +189,13 @@ export function registerOps(on: On) {
         if (e.tool === 'Bash' && result.deny === undefined && TEST_OR_BUILD.test(e.command)) {
           // Automatic red alert: failing diagnostics (tests, builds) raise it, passing ones stand it down
           const failed = result.isError === true
-          const cwd = await $.session.cwd()
-          await healthLock(async () => $.store.set('health', { ...(((await $.store.get('health')) ?? {}) as Record<string, boolean>), [cwd]: failed }))
+          // Keyed by the project, as the crew decks read it: a worktree counts for its project
+          const project = projectOf(await $.session.cwd())!
+          await healthLock(async () => $.store.set('health', { ...(((await $.store.get('health')) ?? {}) as Record<string, boolean>), [project]: failed }))
           if (failed) await setRedAlert($, true, 'Diagnostics failed')
           else if ((await read($, redAlert)).reason === 'Diagnostics failed') await setRedAlert($, false, '')
-          await updateVoyage($, v => ({ ...v, lastBuild: failed ? 'fail' : 'pass', greenBuilds: v.greenBuilds + (failed ? 0 : 1) }))
+          const at = await $.clock.now()
+          await updateVoyage($, v => ({ ...v, lastBuild: failed ? 'fail' : 'pass', lastBuildAt: at, greenBuilds: v.greenBuilds + (failed ? 0 : 1) }))
         }
         if (!isOk) return
         // The voyage: files changed, sensor sweeps and commits, for the console's course readout
@@ -229,7 +235,7 @@ export function registerOps(on: On) {
     return (
       <Box flexDirection="column" rowGap={1} padding="sm">
         {alert.isOn && ('Svg' in el
-          ? <el.Svg source={redAlertSvg(alert.reason, frameWidth)} alt={`Red alert: ${alert.reason}`} width={frameWidth} height={34} isInteractive />
+          ? <el.Svg source={redAlertSvg(alert.reason, frameWidth)} alt={`Red alert: ${alert.reason}`} isInteractive />
           : <Text backgroundColor={LCARS.red} color={LCARS.ink} bold> RED ALERT · {alert.reason} </Text>)}
         <Box flexDirection="row" columnGap={1}>
           <Text backgroundColor={alert.isOn ? '#ff3333' : '#ff9966'} color={LCARS.ink} bold> LIVE BRIDGE </Text>
@@ -272,7 +278,7 @@ export function registerOps(on: On) {
     const { Box, Text, Button } = el
     return (
       <Box flexDirection="column" rowGap={1} padding="sm">
-        <Text backgroundColor={LCARS.violet} color={LCARS.ink} bold> UNIVERSAL TRANSLATOR </Text>
+        <Text backgroundColor={HEAD_COLOR} color={LCARS.ink} bold> UNIVERSAL TRANSLATOR </Text>
         {'Select' in el && (
           <el.Select
             key="language"

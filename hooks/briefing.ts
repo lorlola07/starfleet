@@ -11,14 +11,26 @@ import { basename } from './shared'
 export type Briefing = { status: 'none' | 'loading' | 'ready'; lines: string[]; source: string }
 
 let briefing: Briefing = { status: 'none', lines: [], source: '' }
-let isDismissed = false
+// Acknowledged is kept per chat in the store (key briefing:<session id>), so a reload or a
+// reopened console doesn't bring the briefing back; dismissedFor saves re-reading it each redraw
+let dismissedFor: string | undefined
 
-export function currentBriefing(): Briefing & { isDismissed: boolean } {
-  return { ...briefing, isDismissed }
+async function isDismissed($: EngineInterface): Promise<boolean> {
+  const id = await $.session.id()
+  if (dismissedFor === id) return true
+  if ((await $.store.get(`briefing:${id}`)) !== true) return false
+  dismissedFor = id
+  return true
 }
 
-export function dismissBriefing() {
-  isDismissed = true
+export async function currentBriefing($: EngineInterface): Promise<Briefing & { isDismissed: boolean }> {
+  return { ...briefing, isDismissed: await isDismissed($) }
+}
+
+export async function dismissBriefing($: EngineInterface) {
+  const id = await $.session.id()
+  dismissedFor = id
+  await $.store.set(`briefing:${id}`, true)
 }
 
 async function newestHandoff($: EngineInterface): Promise<{ name: string; text: string } | undefined> {
@@ -41,7 +53,7 @@ WATCH FOR: <one open risk or question, under 14 words, or "Nothing flagged">
 Plain technical wording. Keep real file names and commands.`
 
 export async function buildBriefing($: EngineInterface) {
-  if (briefing.status !== 'none') return
+  if (briefing.status !== 'none' || (await isDismissed($))) return
   briefing = { status: 'loading', lines: [], source: '' }
   $.ui.invalidate('ui.render')
   try {

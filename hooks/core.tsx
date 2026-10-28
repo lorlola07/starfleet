@@ -4,7 +4,7 @@ import type { EngineInterface, On, RenderElement } from 'claude-code'
 import { addLogEntry, bumpMission } from './log'
 import { redAlertSvg, setRedAlert } from './ops'
 import { SHIP_PALETTE, SHIP_ROWS, pixels, stardate } from './shared'
-import { LCARS } from './theme'
+import { HEAD_COLOR, LCARS } from './theme'
 
 // The warp core (context and activity, with Eject core as the handoff), the assimilation
 // meter (the Borg are a filling context window), and the ship gliding above the prompt.
@@ -20,6 +20,7 @@ let lastTier = 0
 let ejectArmedUntil = 0
 let ejectingUntil = 0
 let contextTokens = 0
+let contextWindow = 0
 let isMemoryAlertRaised = false
 
 export function tierOf(percent: number): 0 | 1 | 2 | 3 {
@@ -98,9 +99,16 @@ function handoffPrompt(path: string): string {
   return [
     'The captain has ejected the warp core. Write a handoff document: a stopping point the captain reads to pick up where they left off. It is a bookmark, not a task list for Claude.',
     `Save it to ${path} (create the folder if needed) and reply with the path and a two-line summary.`,
-    'Sections: Where you left off (2-3 sentences), What is done and verified / what is not, Decisions made and why,',
-    'Waiting on you (the decisions only the captain can make), Files and places that matter, Open questions,',
+    'First read the newest earlier handoff in .claude/handoffs, if there is one. Never edit it or any other earlier handoff; this new file replaces it.',
+    'Start the document with "Replaces: <that file name>" (or "Replaces: none").',
+    'Sections: Goal (one sentence: what done looks like for this work); Where you left off (2-3 sentences); Closed since the last handoff (each item the earlier handoff left open that is now settled, one line on how; leave the section out when there is none);',
+    'What is done and verified / what is not; Decisions made and why; Gotchas (what was tried and failed, and why, so it is not retried; and what the code does not show); Waiting on you; To try;',
+    'How to verify (the commands that must pass, each with the result to expect, such as a test count); Files and places that matter (only those touched or needed this session); Open questions;',
     'and Pick up here (the first small thing to do when back, under 2 minutes, written to the captain, not as orders for Claude).',
+    'Durable rules found this session (things that must hold in every later chat) go into memory or CLAUDE.md, not the handoff; the handoff names where each one was saved.',
+    'Carry forward: every item in the earlier handoff\'s Not verified, Waiting on you, To try and Open questions is either listed under Closed or appears again in this one. Nothing is dropped silently.',
+    'Each item goes in exactly one section. It is done and verified only once a test, a command or the captain confirmed it; anything else goes under Not verified, never both.',
+    'Waiting on you holds only decisions the captain must make, each phrased as a choice. Checks for the captain to run go under To try, each with the result to expect. Open questions hold only unknowns not listed elsewhere.',
     'Write it in plain technical language, no theme. Include commands and paths exactly.',
     '',
     'An eject is not the end of the project: it stays open and continues in another chat. Do not close the mission or archive anything; only Close mission ends the project.',
@@ -119,7 +127,9 @@ export async function ejectCore($: EngineInterface) {
   }
   ejectArmedUntil = 0
   ejectingUntil = now + 2600
-  const path = `.claude/handoffs/handoff-${stardate(now)}.md`
+  // The stardate names only the day; the time keeps two handoffs on one day apart
+  const time = new Date(now).toTimeString().slice(0, 5).replace(':', '')
+  const path = `.claude/handoffs/handoff-${stardate(now)}-${time}.md`
   $.ui.toast('💥 Warp core ejected. Writing the handoff document…')
   void $.audio.speak('Warp core ejected.').catch(() => {})
   await bumpMission($, 'handoffs')
@@ -131,14 +141,65 @@ export async function ejectCore($: EngineInterface) {
 
 // What the console needs to draw the core in its own pane
 export function coreFlags(now: number) {
-  return { isArmed: now < ejectArmedUntil, isEjecting: now < ejectingUntil, tokens: contextTokens }
+  return { isArmed: now < ejectArmedUntil, isEjecting: now < ejectingUntil, tokens: contextTokens, window: contextWindow }
 }
 
 // ── Assimilation: the context window as the Borg ──
 
-async function measure($: EngineInterface, percent: number | undefined, tokens: number | undefined) {
+// The tier last announced, whether the 90% alert is up, and the captain's answer to "still
+// mid-task?" at a tier, kept per chat in the store (key coreAlert:<session id>), so a reload
+// neither repeats the tier toast, re-raises a stood-down alert, nor asks the question again
+type Answer = 'mid' | 'done'
+type CoreAlert = { tier: number; isMemoryAlertRaised: boolean; advice?: { tier: number; answer: Answer } }
+// The chat id the alert state was loaded for: /clear keeps the process but changes the id, so a
+// new id loads that chat's own state instead of carrying the last chat's over
+let alertLoadedFor: string | undefined
+// Whether the core pane showed Compact when Claude last stood idle
+let isCompactShown = false
+// The question or advice the core pane showed when Claude last stood idle
+let shownAnswer: Awaited<ReturnType<typeof coreAdvice>>
+let advice: CoreAlert['advice']
+
+async function loadCoreAlert($: EngineInterface) {
+  const id = await $.session.id()
+  if (alertLoadedFor === id) return
+  const saved = (await $.store.get(`coreAlert:${id}`)) as Partial<CoreAlert> | undefined
+  lastTier = saved?.tier ?? 0
+  isMemoryAlertRaised = saved?.isMemoryAlertRaised ?? false
+  advice = saved?.advice
+  alertLoadedFor = id
+}
+
+async function saveCoreAlert($: EngineInterface) {
+  await $.store.set(`coreAlert:${await $.session.id()}`, { tier: lastTier, isMemoryAlertRaised, advice } satisfies CoreAlert)
+}
+
+// From 70% the core asks once per tier whether the work is still mid-task: mid-task means
+// compact and carry on, done means eject to a handoff and a fresh chat
+export async function coreAdvice($: EngineInterface, tier: number): Promise<Answer | 'ask' | undefined> {
+  if (tier < 2) return undefined
+  await loadCoreAlert($)
+  return advice?.tier === tier ? advice.answer : 'ask'
+}
+
+async function answerAdvice($: EngineInterface, answer: Answer) {
+  await loadCoreAlert($)
+  advice = { tier: tierOf(await read($, assimilation)), answer }
+  await saveCoreAlert($)
+  $.ui.invalidate('ui.render')
+}
+
+export const ADVICE_TEXT: Record<Answer, string> = {
+  mid: 'Recommended: Compact, then carry on',
+  done: 'Recommended: Eject core for a handoff and a fresh chat',
+}
+
+async function measure($: EngineInterface, percent: number | undefined, tokens: number | undefined, window?: number) {
   if (percent === undefined) return
+  await loadCoreAlert($)
+  const before: CoreAlert = { tier: lastTier, isMemoryAlertRaised, advice }
   contextTokens = tokens ?? contextTokens
+  contextWindow = window ?? contextWindow
   await update($, assimilation, () => Math.round(percent))
   const tier = tierOf(percent)
   if (tier > lastTier) {
@@ -146,21 +207,27 @@ async function measure($: EngineInterface, percent: number | undefined, tokens: 
     if (tier === 3) void $.audio.speak('Your context will be assimilated. Resistance is futile.').catch(() => {})
   }
   lastTier = tier
+  // Once the load falls below the tier an answer was given at (a compact, say), the answer is spent:
+  // climbing back asks again
+  if (advice && tier < advice.tier) advice = undefined
   // Raise once on crossing 90%, so a stand-down holds until context drops and climbs again
   if (percent >= 90 && !isMemoryAlertRaised) await setRedAlert($, true, 'Memory banks nearly assimilated')
   isMemoryAlertRaised = percent >= 90
+  if (before.tier !== lastTier || before.isMemoryAlertRaised !== isMemoryAlertRaised || before.advice !== advice) {
+    await saveCoreAlert($)
+  }
 }
 
 export async function coreSessionStart($: EngineInterface) {
   await $.command.register({ name: 'warp-core', description: 'Open the warp core: context, activity, and Eject core for a handoff document', immediate: true })
   await $.command.register({ name: 'eject-core', description: 'Eject the warp core: Claude writes a handoff and continues the project in a new chat', immediate: true })
   const usage = await $.session.usage()
-  await measure($, usage.context.percent, usage.context.tokens)
+  await measure($, usage.context.percent, usage.context.tokens, usage.context.window)
 }
 
 export function registerCore(on: On) {
   on('session.measure', async ($, e, next) => {
-    await measure($, e.context.percent, e.context.tokens)
+    await measure($, e.context.percent, e.context.tokens, e.context.window)
     return next(e)
   })
 
@@ -185,11 +252,16 @@ export function registerCore(on: On) {
     const isEjecting = now < ejectingUntil
     const tier = tierOf(percent)
     const isWorking = (await read($, activity)).turnStartedAt !== null
+    // The question, its advice and the Compact button wait for the turn to end, so the pane never
+    // grows mid-turn: during a turn they stay as the last idle draw left them
+    if (!isWorking) isCompactShown = tier >= 2
+    if (!isWorking) shownAnswer = await coreAdvice($, tier)
+    const answer = shownAnswer
     const frameWidth = Math.max(220, Math.min(520, ((e.props.bodyColumns ?? 50) - 2) * 8))
     return (
       <Box flexDirection="column" rowGap={1} padding="sm">
-        {alert.isOn && 'Svg' in el && <el.Svg source={redAlertSvg(alert.reason, frameWidth)} alt={`Red alert: ${alert.reason}`} width={frameWidth} height={34} isInteractive />}
-        <Text backgroundColor={LCARS.violet} color={LCARS.ink} bold> MAIN ENGINEERING · WARP CORE </Text>
+        {alert.isOn && 'Svg' in el && <el.Svg source={redAlertSvg(alert.reason, frameWidth)} alt={`Red alert: ${alert.reason}`} height={34} isInteractive />}
+        <Text backgroundColor={HEAD_COLOR} color={LCARS.ink} bold> MAIN ENGINEERING · WARP CORE </Text>
         <Box flexDirection="row" columnGap={2}>
           {'Svg' in el
             ? <el.Svg source={coreSvg(percent, isWorking, isEjecting)} alt={`Warp core at ${percent}% load`} width={80} height={200} isInteractive />
@@ -197,7 +269,13 @@ export function registerCore(on: On) {
           <Box flexDirection="column" rowGap={1}>
             <Text>Core load <Text color={tier >= 2 ? 'success' : '#9999ff'} bold>{percent}%</Text> of memory banks</Text>
             <Text dimColor>{contextTokens ? `${Math.round(contextTokens / 1000)}k tokens of dilithium` : 'Reading dilithium levels…'}</Text>
-            <Text color={tier >= 2 ? 'success' : undefined}>{tier ? `🟩 ${TIER_TEXT[tier]}` : 'No Borg on sensors'}</Text>
+            <Text color={tier >= 2 ? 'success' : undefined} wrap="truncate">{tier ? `🟩 ${TIER_TEXT[tier]}` : 'No Borg on sensors'}</Text>
+            {answer === 'ask' && <Text bold>Still mid-task, or done?</Text>}
+            {answer === 'ask' && <Box flexDirection="row" columnGap={1}>
+              <Button key="mid" label="Mid-task (m)" hotkey="m" onPress={() => answerAdvice($, 'mid')} />
+              <Button key="done" label="Done (d)" hotkey="d" onPress={() => answerAdvice($, 'done')} />
+            </Box>}
+            {(answer === 'mid' || answer === 'done') && <Text color="success" bold>{ADVICE_TEXT[answer]}</Text>}
             {isEjecting && <Text color="error" bold>CORE EJECTED · handoff in progress</Text>}
             <Button
               key="eject"
@@ -207,7 +285,7 @@ export function registerCore(on: On) {
               onPress={() => ejectCore($)}
             />
             <Text dimColor italic>Eject writes a handoff and continues in a new chat. The project stays open.</Text>
-            {tier >= 2 && <Button key="compact" label="Compact memory banks (c)" hotkey="c" onPress={async () => {
+            {isCompactShown && <Button key="compact" label="Compact memory banks (c)" hotkey="c" onPress={async () => {
               $.ui.toast('🟩 Compacting before assimilation…')
               await $.session.compact()
             }} />}
@@ -236,7 +314,7 @@ export function registerCore(on: On) {
     if (e.props.isWorking) {
       const tint = alert.isOn ? 'red' : tier >= 2 ? 'borg' : 'none'
       return beside('Svg' in el
-        ? <el.Svg source={glideSvg(width, tint)} alt="An 8-bit starship gliding through stars" width={width} height={40} isInteractive />
+        ? <el.Svg source={glideSvg(width, tint)} alt="An 8-bit starship gliding through stars" isInteractive />
         : <Text color={LCARS.violet}>{'  ·   ✦      ·  >=<   ·    ✦  '}</Text>)
     }
     if (alert.isOn) {
@@ -249,12 +327,18 @@ export function registerCore(on: On) {
       )
     }
     if (tier >= 1) {
+      const answer = await coreAdvice($, tier)
       return beside(
         <Box flexDirection="row" columnGap={1} alignItems="center" flexWrap="wrap">
           <Text backgroundColor={LCARS.green} color={LCARS.ink} bold> ASSIMILATION {percent}% </Text>
           <Text color="success">{TIER_TEXT[tier]}</Text>
-          {tier >= 2 && <Button key="band-compact" label="Compact" plain onPress={() => $.session.compact()} />}
-          {tier >= 2 && <Button key="band-eject" label="Eject core" plain onPress={() => ejectCore($)} />}
+          {answer === 'ask' && <Text bold>· Still mid-task?</Text>}
+          {answer === 'ask' && <Button key="band-mid" label="Mid-task" plain onPress={() => answerAdvice($, 'mid')} />}
+          {answer === 'ask' && <Button key="band-done" label="Done" plain onPress={() => answerAdvice($, 'done')} />}
+          {answer === 'mid' && <Text bold>· Recommended:</Text>}
+          {answer === 'mid' && <Button key="band-compact" label="Compact" plain onPress={() => $.session.compact()} />}
+          {answer === 'done' && <Text bold>· Recommended:</Text>}
+          {answer === 'done' && <Button key="band-eject" label="Eject core" plain onPress={() => ejectCore($)} />}
         </Box>
       )
     }

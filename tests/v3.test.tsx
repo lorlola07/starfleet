@@ -1,5 +1,9 @@
 import { expect, test } from 'claude-code/testing'
-import { TEST_OR_BUILD } from '../hooks/shared'
+import { TEST_OR_BUILD, stardate } from '../hooks/shared'
+import { courseOf } from '../hooks/voyage'
+import { SPRITES, SPRITE_COLORS, SPRITE_ORDER, taggedTitle } from '../hooks/shared'
+import { viewscreenSvg } from '../hooks/theme'
+import { crewSvg } from '../hooks/crew'
 
 // The test runtime has timers; the mod's own types leave them out
 // $.tool.call through a plain signature: inferring each tool's input type is too deep for tsc
@@ -24,7 +28,7 @@ const opened: string[] = []
 // What session.id answers; a test may change it to act out /clear
 let sessionId = 'sess-1'
 
-function engine(on: any, run?: (_: unknown, e: { argv: string[] }) => unknown, live?: { name: string; text: string }) {
+function engine(on: any, run?: (_: unknown, e: { argv: string[] }) => unknown, live?: { name: string; text: string }, fs?: { exists?: (_: unknown, e: { path: string }) => unknown; list?: (_: unknown, e: { path: string }) => unknown; cwd?: string; toasts?: string[] }) {
   const store: Record<string, unknown> = {}
   on('command.register', () => ({ value: { command: 'x' } }))
   on('tool.register', () => ({ value: { tool: 'mcp__starfleet__x' } }))
@@ -35,12 +39,12 @@ function engine(on: any, run?: (_: unknown, e: { argv: string[] }) => unknown, l
   on('store.delete', (_: unknown, e: { key: string }) => { delete store[e.key]; return { value: undefined } })
   on('store.keys', () => ({ value: Object.keys(store) }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 150000, window: 200000, percent: 75 }, rateLimits: [] } }))
-  on('session.cwd', () => ({ value: '/Users/cap/MOD' }))
+  on('session.cwd', () => ({ value: fs?.cwd ?? '/Users/cap/MOD' }))
   on('session.id', () => ({ value: sessionId }))
   on('env.get', () => ({ value: '/Users/cap' }))
   if (live) on('fs.read', (_: unknown, e: { path: string }) => (e.path.endsWith(live.name) ? { value: live.text } : { value: '' }))
-  on('fs.list', (_: unknown, e: { path: string }) => e.path.endsWith('starfleet-live') ? { value: live ? [{ name: live.name, kind: 'file', size: 1, mtimeMs: Date.now(), isLink: false }] : [] } : ({ value: [{ name: '-Users-cap-MOD', kind: 'dir', size: 0, mtimeMs: Date.now(), isLink: false }, { name: '-Users-cap-old-app', kind: 'dir', size: 0, mtimeMs: Date.now() - 9 * 86400000, isLink: false }] }))
-  on('fs.exists', () => ({ value: true }))
+  on('fs.list', fs?.list ?? ((_: unknown, e: { path: string }) => e.path.endsWith('starfleet-live') ? { value: live ? [{ name: live.name, kind: 'file', size: 1, mtimeMs: Date.now(), isLink: false }] : [] } : ({ value: [{ name: '-Users-cap-MOD', kind: 'dir', size: 0, mtimeMs: Date.now(), isLink: false }, { name: '-Users-cap-old-app', kind: 'dir', size: 0, mtimeMs: Date.now() - 9 * 86400000, isLink: false }] })))
+  on('fs.exists', fs?.exists ?? (() => ({ value: true })))
   on('fs.stat', (_: unknown, e: { path: string }) => ({ value: { kind: 'dir', size: 0, mtimeMs: e.path.endsWith('old-app') ? Date.now() - 9 * 86400000 : Date.now(), isLink: false } }))
   on('process.run', run ?? (() => ({ value: { exitCode: 0, stdout: ' M hooks/core.tsx\n', stderr: '' } })))
   on('session.start', (_: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
@@ -50,7 +54,7 @@ function engine(on: any, run?: (_: unknown, e: { argv: string[] }) => unknown, l
     const { Text } = $.ui.resolve(e) as { Text: any }
     return <Text>other plugin band</Text>
   })
-  on('ui.toast', () => ({ value: undefined }))
+  on('ui.toast', (_: unknown, e: { text?: string }) => { fs?.toasts?.push(String(e.text ?? '')); return { value: undefined } })
   on('ui.status', () => ({ value: undefined }))
   on('clock.now', () => ({ value: Date.now() }))
   on('audio.speak', () => ({ value: { synthesizer: 'test' } }))
@@ -107,13 +111,16 @@ test('the console draws its LCARS layout on desktop and terminal', async ($, on)
 
   for (const surface of ['desktop', 'terminal'] as const) {
     const ui = await $.ui.mount(pane('starfleet-console', surface))
-    expect((await ui.find({ type: 'Text', text: /COND (GREEN|YELLOW|BORG|RED)/ }))?.text).toBeTruthy()
-    expect((await ui.find({ type: 'Text', text: /STARDATE \d{4}\.\d{4}\.\d{4}/ }))?.text).toBeTruthy()
+    expect((await ui.find({ type: 'Text', text: /CONDITION (GREEN|YELLOW|BORG|RED)/ }))?.text).toBeTruthy()
+    expect((await ui.find({ type: 'Text', text: /STARDATE \d{4}\.\d{2}\b/ }))?.text).toBeTruthy()
     expect((await ui.find({ type: 'Text', text: /TIME LOG/ }))?.text).toBeTruthy()
     expect((await ui.find({ type: 'Text', text: /MISSION BRIEFING/ }))?.text).toContain('BRIEFING')
     expect((await ui.find({ type: 'Text', text: /STANDING ORDER/ }))?.text).toContain('STANDING ORDER')
     // The captain's log is a capture field and buttons, with no entry list
-    expect(await ui.find({ type: 'Button', key: 'sync' })).toBeTruthy()
+    expect(await ui.find({ type: 'Button', key: 'record' })).toBeTruthy()
+    expect(await ui.find({ type: 'Button', key: 'sync' })).toBeFalsy()
+    expect(await ui.find({ type: 'Button', key: 'ask' })).toBeFalsy()
+    expect(await ui.find({ type: 'Button', key: 'md' })).toBeFalsy()
     expect(await ui.find({ type: 'Button', key: 'open-log' })).toBeFalsy()
     expect(await ui.find({ type: 'Text', text: /beam up/ })).toBeFalsy()
     expect(await ui.find({ type: 'Button', key: 'sec-bridge' })).toBeFalsy()
@@ -133,7 +140,7 @@ test('the console draws its LCARS layout on desktop and terminal', async ($, on)
   expect(JSON.stringify(store.consoleOpen)).toContain('true')
 })
 
-test('the log files entries by kind, and the course follows files changed and builds', async ($, on) => {
+test('the log saves notes as typed, and the course follows files changed and builds', async ($, on) => {
   const store = engine(on)
   on('audio.play', () => ({ value: undefined }))
   on('tool.call', () => ({ result: 'ok' }))
@@ -153,14 +160,30 @@ test('the log files entries by kind, and the course follows files changed and bu
   // The course stage and its detail sit on separate lines
   expect(await ui.find({ type: 'Text', text: /HOLDING ORBIT/ })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: /no course plotted/ })).toBeTruthy()
-  await $.ui.select({ plugin: 'starfleet', key: 'log-file', value: 'Idea' })
+  // Entries carry no type: no type menu or buttons, and the note is saved as typed
+  expect(await ui.find({ type: 'Select', key: 'log-file' })).toBeFalsy()
+  expect((await ui.findAll({ type: 'Button' })).some(b => String((b as { key?: string }).key ?? b.props.key).startsWith('log-type-'))).toBe(false)
   await $.ui.input({ plugin: 'starfleet', key: 'log-0', text: 'tribbles as fixtures' })
-  expect(JSON.stringify(store['log:' + sessionId])).toContain('Idea: tribbles as fixtures')
+  expect(JSON.stringify(store['log:' + sessionId])).toContain('"text":"tribbles as fixtures"')
+  await $.ui.input({ plugin: 'starfleet', key: 'log-1', text: 'plain note' })
+  expect(JSON.stringify(store['log:' + sessionId])).toContain('"text":"plain note"')
+  // Unnumbered blocks first: the Captain's log sits above the numbered crew section, no emoji
+  const order = JSON.stringify(await $.ui.render(pane('starfleet-console', 'desktop')))
+  expect(order.indexOf('CREW DECKS')).toBeGreaterThan(-1)
+  expect(order.indexOf('CAPTAIN’S LOG')).toBeLessThan(order.indexOf('CREW DECKS'))
+  // Under the stardate: the log, then the last order, then the briefing
+  expect(order.indexOf('STARDATE')).toBeLessThan(order.indexOf('CAPTAIN’S LOG'))
+  expect(order.indexOf('CAPTAIN’S LOG')).toBeLessThan(order.indexOf('LAST ORDER'))
+  expect(order.indexOf('LAST ORDER')).toBeLessThan(order.indexOf('MISSION BRIEFING'))
+  expect(order).not.toContain('📓 CAPTAIN')
+  expect(order).not.toContain('💬 LAST ORDER')
   await callTool($, { tool: 'Edit', file_path: '/Users/cap/MOD/a.ts', old_string: 'a', new_string: 'b' })
   await callTool($, { tool: 'Bash', command: 'npm test' })
   expect(await ui.find({ type: 'Text', text: /MISSION ADVANCING/ })).toBeTruthy()
   const detail = await ui.find({ type: 'Text', text: /1 file changed/ })
-  expect(detail?.text).toContain('1 green build')
+  expect(detail?.text).toContain('tests passed once')
+  expect(detail?.text).toContain('last check passed just now')
+  expect(detail?.text).not.toContain('green build')
   expect(detail?.text).not.toContain('MISSION ADVANCING')
   await ui.unmount()
 })
@@ -182,10 +205,10 @@ test('close mission sends a closure report that marks the mission closed for arc
   await ui.unmount()
 })
 
-test('projects no longer aboard give their sprites back', async ($, on) => {
+test('a project that leaves the decks keeps its sprite until a newcomer needs it', async ($, on) => {
   const store = engine(on)
-  // Eight archived projects hold every sprite
-  const sprites = ['picard', 'data', 'geordi', 'worf', 'seven', 'riker', 'troi', 'crusher']
+  // Projects that left the decks hold every sprite
+  const sprites = SPRITE_ORDER
   store.crewAssign = Object.fromEntries(sprites.map((s, i) => [`/Users/cap/archived-${i}`, s]))
   await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
   const run = $.command.run as (input: { command: string; args: string }) => Promise<unknown>
@@ -193,7 +216,38 @@ test('projects no longer aboard give their sprites back', async ($, on) => {
   const crew = store.crew as { path: string; sprite: string }[]
   expect(crew.length).toBe(2)
   expect(new Set(crew.map(c => c.sprite)).size).toBe(2)
-  expect(Object.keys(store.crewAssign as object).sort()).toEqual(crew.map(c => c.path).sort())
+  // The two newcomers took two sprites back; the others keep theirs for when they return
+  const assign = store.crewAssign as Record<string, string>
+  expect(Object.keys(assign).length).toBe(SPRITE_ORDER.length)
+  for (const c of crew) expect(assign[c.path]).toBe(c.sprite)
+})
+
+test('a project that left keeps its sprite while free ones remain', async ($, on) => {
+  const store = engine(on)
+  store.crewAssign = { '/Users/cap/archived-0': 'worf' }
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
+  expect((store.crew as { sprite: string }[]).map(c => c.sprite)).not.toContain('worf')
+  expect((store.crewAssign as Record<string, string>)['/Users/cap/archived-0']).toBe('worf')
+})
+
+test('project folders with spaces or underscores join the crew', async ($, on) => {
+  // ~/.claude/projects turns "Side Work" and "field_notes" into dashes; only the real names exist
+  const real = new Set(['/Users', '/Users/cap', '/Users/cap/MOD', '/Users/cap/Side Work', '/Users/cap/field_notes'])
+  const dir = (name: string) => ({ name, kind: 'dir', size: 0, mtimeMs: Date.now(), isLink: false })
+  const store = engine(on, undefined, undefined, {
+    exists: (_, e) => ({ value: real.has(e.path) }),
+    list: (_, e) => ({
+      value: e.path.endsWith('/.claude/projects') ? [dir('-Users-cap-MOD'), dir('-Users-cap-Side-Work'), dir('-Users-cap-field-notes')]
+        : e.path === '/Users/cap' ? [dir('MOD'), dir('Side Work'), dir('field_notes')]
+        : [],
+    }),
+  })
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
+  const paths = (store.crew as { path: string }[]).map(c => c.path)
+  expect(paths).toContain('/Users/cap/Side Work')
+  expect(paths).toContain('/Users/cap/field_notes')
 })
 
 test('projects archived in the app leave the decks', async ($, on) => {
@@ -210,6 +264,31 @@ test('projects archived in the app leave the decks', async ($, on) => {
   await run({ command: 'crew', args: '' })
   const crew = store.crew as { path: string }[]
   expect(crew.map(c => c.path)).toEqual(['/Users/cap/MOD'])
+})
+
+test('each chat in a crew project gets that crew member\'s emoji in front of its name', async ($, on) => {
+  const store = engine(on)
+  const titles: Record<string, string> = {}
+  const sessions = [
+    { sessionId: 'a', title: '🟧 Old tag from before', cwd: '/Users/cap/MOD', isArchived: false },
+    { sessionId: 'b', title: 'Archived chat', cwd: '/Users/cap/MOD', isArchived: true },
+    { sessionId: 'c', title: 'Not a crew project', cwd: '/Users/cap/elsewhere', isArchived: false },
+    // Its project left the decks and its sprite went to someone else: the old emoji comes off
+    { sessionId: 'd', title: '🟨 Departed project', cwd: '/Users/cap/gone', isArchived: false },
+  ]
+  on('mcp.call', (_: unknown, e: { tool: string; args: { session_id?: string; title?: string } }) => {
+    if (e.tool === 'set_session_title') titles[e.args.session_id!] = e.args.title!
+    const body = e.tool === 'get_session' ? { sessionId: 'local_self', title: 'This chat', cwd: '/Users/cap/MOD/.claude/worktrees/x' } : sessions
+    return { value: { content: [{ type: 'text', text: JSON.stringify(body) }], isError: false } }
+  })
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
+  const sprite = (store.crewAssign as Record<string, string>)['/Users/cap/MOD']
+  expect(sprite).toBe('picard')
+  expect(titles).toEqual({ a: '🟥 Old tag from before', d: 'Departed project', self: '🟥 This chat' })
+  // The crew decks list the same emoji
+  const tree = JSON.stringify(await $.ui.render(pane('starfleet-crew', 'terminal')))
+  expect(tree).toContain('🟥')
 })
 
 test('the shields deny a destructive Bash call with the reason, and let safe ones through', async ($, on) => {
@@ -276,7 +355,7 @@ test('focus mode shows only the comms badge, and hailing opens the console', asy
     await ui.press({ key: 'focus' })
     expect(store.focusMode).toBe(true)
     expect(await ui.find({ type: 'Button', key: 'hail' })).toBeTruthy()
-    expect(await ui.find({ type: 'Button', key: 'sync' })).toBeFalsy()
+    expect(await ui.find({ type: 'Button', key: 'record' })).toBeFalsy()
     expect(await ui.find({ type: 'Text', text: /CONDITION|BORG/ })).toBeFalsy()
     if (surface === 'desktop') {
       expect(await ui.find({ type: 'Svg' })).toBeTruthy()
@@ -290,7 +369,7 @@ test('focus mode shows only the comms badge, and hailing opens the console', asy
     }
     await ui.press({ key: 'hail' })
     expect(store.focusMode).toBe(false)
-    expect(await ui.find({ type: 'Button', key: 'sync' })).toBeTruthy()
+    expect(await ui.find({ type: 'Button', key: 'record' })).toBeTruthy()
     await ui.unmount()
   }
 
@@ -301,7 +380,7 @@ test('focus mode shows only the comms badge, and hailing opens the console', asy
   expect(store.focusMode).toBe(false)
 })
 
-test('this session’s sprite holds its deck between tools', async ($, on) => {
+test('every sprite holds its deck while Claude works, so the crew picture never changes mid-turn', async ($, on) => {
   engine(on)
   let finishTool = () => {}
   on('tool.call', () => new Promise(done => { finishTool = () => done({ result: {} }) }))
@@ -319,11 +398,11 @@ test('this session’s sprite holds its deck between tools', async ($, on) => {
   await ($.turn as unknown as { start: (input: object) => Promise<unknown> }).start({ text: 'scan', turnId: 't1' })
   const running = ($.tool as unknown as { call: (input: object) => Promise<unknown> }).call({ tool: 'Grep', pattern: 'warp' })
   await new Promise(r => (globalThis as unknown as { setTimeout: (f: unknown, ms: number) => void }).setTimeout(r, 0))
-  expect(await deckOfMod()).toBe('science')
-  // The tool finished and no next one is known yet: it stays in science
+  // A Grep would be science, but mid-turn the sprite stays where the turn found it
+  expect(await deckOfMod()).toBe('engineering')
   finishTool()
   await running
-  expect(await deckOfMod()).toBe('science')
+  expect(await deckOfMod()).toBe('engineering')
 })
 
 test('the mission record keeps models, plugins, skills, files and the warp core', async ($, on) => {
@@ -386,20 +465,495 @@ test('the cloud crew tool sends a repo ashore', async ($, on) => {
   expect((store.crew as { project: string }[]).some(c => c.project === 'Voyager')).toBe(false)
 })
 
+test('the crew tool marks a folder as not a project, and brings it back', async ($, on) => {
+  const store = engine(on)
+  on('tool.call', () => ({ result: 'ok' }))
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
+  const hid = await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: 'mod', aboard: false }) as { result: string }
+  expect(hid.result).toContain('left the crew')
+  expect(store.crewHidden).toEqual(['/Users/cap/MOD'])
+  expect((store.crew as { path: string }[]).map(c => c.path)).not.toContain('/Users/cap/MOD')
+  // Its character is freed for someone else
+  expect(Object.keys(store.crewAssign as object)).not.toContain('/Users/cap/MOD')
+  const back = await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: 'MOD', aboard: true }) as { result: string }
+  expect(back.result).toContain('aboard')
+  expect(store.crewHidden).toEqual([])
+  expect((store.crew as { path: string }[]).map(c => c.path)).toContain('/Users/cap/MOD')
+})
+
+test('the console removes and adds a project after asking, by its name', async ($, on) => {
+  const store = engine(on)
+  const asked: string[] = []
+  let answer = ''
+  on('tool.call', (_: unknown, e: { tool: string; questions?: { question: string }[] }) => {
+    if (e.tool !== 'AskUserQuestion') return { result: 'ok' }
+    const question = e.questions![0]!.question
+    asked.push(question)
+    return { result: { questions: e.questions, answers: { [question]: answer } } }
+  })
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
+  const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
+  const header = await ui.find({ type: 'Button', key: 'sec-crew' })
+  if (header?.text.startsWith('▸')) await ui.press({ key: 'sec-crew' })
+
+  // Remove: pick the project, then the popup names it; Keep changes nothing
+  await ui.press({ key: 'crew-remove' })
+  answer = 'Keep'
+  await ui.press({ key: 'crew-pick-/Users/cap/old/app' })
+  expect(asked.at(-1)).toBe('Remove app from the crew?')
+  expect(store.crewHidden ?? []).toEqual([])
+  await ui.press({ key: 'crew-remove' })
+  answer = 'Remove app'
+  await ui.press({ key: 'crew-pick-/Users/cap/old/app' })
+  expect(store.crewHidden).toEqual(['/Users/cap/old/app'])
+  expect((store.crew as { path: string }[]).map(c => c.path)).not.toContain('/Users/cap/old/app')
+
+  // Add: the removed folder is offered back, and joins after the popup
+  await ui.press({ key: 'crew-add' })
+  answer = 'Add app'
+  await ui.press({ key: 'crew-pick-/Users/cap/old/app' })
+  expect(asked.at(-1)).toBe('Add app to the crew?')
+  expect(store.crewHidden).toEqual([])
+  // Undoing a removal of a recent project doesn't pin it aboard for good
+  expect(store.crewAdded ?? []).toEqual([])
+  expect((store.crew as { path: string }[]).map(c => c.path)).toContain('/Users/cap/old/app')
+
+  // Other folder: a typed path joins too
+  await ui.press({ key: 'crew-add' })
+  answer = '~/fresh'
+  await ui.press({ key: 'crew-other' })
+  expect(store.crewAdded).toEqual(['/Users/cap/fresh'])
+  expect((store.crew as { path: string }[]).map(c => c.path)).toContain('/Users/cap/fresh')
+  await ui.unmount()
+})
+
+test('a log entry saved in the old stardate format reads in the new one', async ($, on) => {
+  const store = engine(on)
+  const at = new Date(2026, 9, 27, 10, 54).getTime()
+  store['log:sess-1'] = [{ id: 'log-old', stardate: '2026.1027.1054', text: 'old note', at, project: 'MOD' }]
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const ran = await callTool($, { tool: 'mcp__starfleet__starfleet_records' }) as { result: string }
+  expect(ran.result).toContain('"stardate": "1027.26"')
+  expect(ran.result).not.toContain('2026.1027.1054')
+})
+
+test('About opens a pane that names every part and what it connects to', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  for (const surface of ['desktop', 'terminal'] as const) {
+    const ui = await $.ui.mount(pane('starfleet-console', surface))
+    opened.length = 0
+    await ui.press({ key: 'about' })
+    expect(opened).toContain('starfleet-about')
+    await ui.unmount()
+    const about = await $.ui.mount(pane('starfleet-about', surface))
+    for (const part of ['Crew decks', 'Captain', 'warp core', 'Dilithium', 'Shields', 'Starfleet Command hub', '/translator']) expect(await about.find({ type: 'Text', text: new RegExp(part) })).toBeTruthy()
+    expect((await about.findAll({ type: 'Text', text: /^↔/ })).length).toBeGreaterThan(8)
+    expect(JSON.stringify(await about.findAll({ type: 'Text' }))).not.toMatch(/—|–/)
+    await about.unmount()
+  }
+})
+
+test('added folders never push the crew past the 11 sprites, and adding a 12th is refused', async ($, on) => {
+  const full = SPRITE_ORDER.length
+  expect(full).toBe(11)
+  const store = engine(on)
+  on('tool.call', () => ({ result: 'ok' }))
+  store.crewAdded = Array.from({ length: full + 1 }, (_, i) => `/Users/cap/added-${i}`)
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
+  const crew = store.crew as { sprite: string }[]
+  expect(crew.length).toBeLessThanOrEqual(full)
+  expect(new Set(crew.map(c => c.sprite)).size).toBe(crew.length)
+  store.crewAdded = Array.from({ length: full }, (_, i) => `/Users/cap/added-${i}`)
+  const ran = await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: '/Users/cap/old/app', aboard: true }) as { result: string }
+  expect(ran.result).toContain('full')
+  expect((store.crewAdded as string[]).length).toBe(full)
+})
+
+test('an added folder that no longer exists leaves its crew slot free', async ($, on) => {
+  const dir = (name: string) => ({ name, kind: 'dir', size: 0, mtimeMs: Date.now(), isLink: false })
+  const store = engine(on, undefined, undefined, {
+    exists: (_, e) => ({ value: e.path !== '/Users/cap/gone' }),
+    list: (_, e) => ({ value: e.path.endsWith('/.claude/projects') ? Array.from({ length: 8 }, (_, i) => dir(`-Users-cap-p${i}`)) : [] }),
+  })
+  store.crewAdded = ['/Users/cap/gone']
+  await $.session.start({ cwd: '/Users/cap/p0', surface: 'desktop', isInteractive: true })
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
+  expect((store.crew as unknown[]).length).toBe(8)
+})
+
+test('the crew scan skips temp and scratch project dirs without decoding them', async ($, on) => {
+  const looked: string[] = []
+  const dir = (name: string) => ({ name, kind: 'dir', size: 0, mtimeMs: Date.now(), isLink: false })
+  engine(on, undefined, undefined, {
+    exists: (_, e) => { looked.push(e.path); return { value: true } },
+    list: (_, e) => ({ value: e.path.endsWith('/.claude/projects') ? [dir('-Users-cap-MOD'), ...Array.from({ length: 20 }, (_, i) => dir(`-private-tmp-claude-501-scratch-${i}`))] : [] }),
+  })
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
+  expect(looked.filter(p => p.startsWith('/private')).length).toBe(0)
+})
+
+test('deleting a log entry also takes it off the hub', async ($, on) => {
+  const store = engine(on)
+  const sent: string[] = []
+  on('prompt.submit', (_: unknown, e: { text: string }) => { sent.push(e.text); return { text: e.text } })
+  store.hubUrl = 'https://claude.ai/artifact/hub1'
+  store['log:sess-1'] = [{ id: 'log-1', stardate: '1027.26', text: 'typo', at: Date.now(), project: 'MOD' }]
+  store['log:sess-1'] = [...store['log:sess-1'] as unknown[], { id: 'log-2', stardate: '1027.26', text: 'also a typo', at: Date.now(), project: 'MOD' }]
+  let answer = 'Keep'
+  let hubWorks = true
+  const asked: string[] = []
+  const hub: { action: string; writes?: unknown[]; doc_id?: string }[] = []
+  on('tool.call', (_: unknown, e: { tool: string; action?: string; questions?: { question: string }[] }) => {
+    if (e.tool === 'ArtifactData') {
+      hub.push(e as never)
+      if (!hubWorks) return { deny: 'no hub here' }
+      return e.action === 'get' ? { result: 'ok', text: '{"id":"log-1","data":{},"version":3}' } : { result: 'ok', text: 'committed' }
+    }
+    if (e.tool !== 'AskUserQuestion') return { result: 'ok' }
+    const question = e.questions![0]!.question
+    asked.push(question)
+    return { result: { questions: e.questions, answers: { [question]: answer } } }
+  })
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount(pane('starfleet-log', 'desktop'))
+  // Keep (the default) changes nothing; Delete entry removes it here and, with no chat turn, on the hub
+  await ui.press({ key: 'del-log-1' })
+  expect(asked[0]).toBe('Delete the log entry "typo"?')
+  expect((store['log:sess-1'] as unknown[]).length).toBe(2)
+  answer = 'Delete entry'
+  await ui.press({ key: 'del-log-1' })
+  expect((store['log:sess-1'] as { id: string }[]).map(e => e.id)).toEqual(['log-2'])
+  expect(sent).toEqual([])
+  expect(JSON.stringify(hub)).toContain('"collection":"logDeleted","doc_id":"log-1"')
+  expect(JSON.stringify(hub)).toContain('"op":"delete","collection":"log","doc_id":"log-1","if_version":3')
+  // Where the hub can't be written directly, Claude is asked instead
+  hubWorks = false
+  await ui.press({ key: 'del-log-2' })
+  expect(sent.some(t => t.includes('logDeleted') && t.includes('log-2') && t.includes('hub1'))).toBe(true)
+  await ui.unmount()
+})
+
+test('a recorded note goes straight to the hub, with no chat turn', async ($, on) => {
+  const store = engine(on)
+  const sent: string[] = []
+  on('prompt.submit', (_: unknown, e: { text: string }) => { sent.push(e.text); return { text: e.text } })
+  store.hubUrl = 'https://claude.ai/artifact/hub1'
+  const hub: unknown[] = []
+  on('tool.call', (_: unknown, e: { tool: string }) => {
+    if (e.tool === 'ArtifactData') hub.push(e)
+    return { result: 'ok', text: 'committed' }
+  })
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'log', args: 'a thought' })
+  expect(sent).toEqual([])
+  expect(JSON.stringify(hub)).toContain('"op":"set","collection":"log","doc_id":"log-')
+  expect(JSON.stringify(hub)).toContain('"text":"a thought"')
+})
+
+test('notes recorded before there is a hub are sent once the hub is set', async ($, on) => {
+  const store = engine(on)
+  on('prompt.submit', (_: unknown, e: { text: string }) => ({ text: e.text }))
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'log', args: 'before the hub' })
+  expect((store.hubPending as unknown[]).length).toBe(1)
+  const ran = await callTool($, { tool: 'mcp__starfleet__starfleet_set_hub', url: 'https://claude.ai/artifact/hub2' }) as { result: string }
+  expect(ran.result).toContain('before the hub')
+  expect(store.hubPending ?? []).toEqual([])
+})
+
+test('a failing test run in a worktree chat puts its project in sickbay', async ($, on) => {
+  const store = engine(on, undefined, undefined, { cwd: '/Users/cap/MOD/.claude/worktrees/x' })
+  on('tool.call', () => ({ result: { stdout: '', stderr: 'FAIL', interrupted: false }, isError: true }))
+  on('audio.play', () => ({ value: undefined }))
+  await $.session.start({ cwd: '/Users/cap/MOD/.claude/worktrees/x', surface: 'desktop', isInteractive: true })
+  await callTool($, { tool: 'Bash', command: 'npm test' })
+  expect((store.health as Record<string, boolean>)['/Users/cap/MOD']).toBe(true)
+})
+
+test('a second crew scan reuses decoded project folders', async ($, on) => {
+  let looked = 0
+  engine(on, undefined, undefined, { exists: () => { looked += 1; return { value: true } } })
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const run = $.command.run as (input: { command: string; args: string }) => Promise<unknown>
+  await run({ command: 'crew', args: '' })
+  looked = 0
+  await run({ command: 'crew', args: '' })
+  // One check per cached folder (it may have moved), not a fresh walk of every path segment
+  expect(looked).toBeLessThanOrEqual(2)
+})
+
+test('the add and remove lists open in one pane at a time', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
+  const console_ = await $.ui.mount(pane('starfleet-console', 'desktop'))
+  await console_.press({ key: 'crew-add' })
+  expect(await console_.find({ type: 'Button', key: 'crew-other' })).toBeTruthy()
+  const crew = await $.ui.mount(pane('starfleet-crew', 'desktop'))
+  expect(await crew.find({ type: 'Button', key: 'crew-other' })).toBeFalsy()
+  await crew.unmount()
+  await console_.unmount()
+})
+
+test('/hub clear says how the next hub gets made', async ($, on) => {
+  const store = engine(on)
+  store.hubUrl = 'https://claude.ai/artifact/hub1'
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const ran = await ($.command.run as (input: { command: string; args: string }) => Promise<{ text?: string }>)({ command: 'hub', args: 'clear' })
+  expect(ran.text).toContain('Close mission')
+  expect(ran.text).not.toMatch(/next sync/)
+})
+
+test('console drawings fit a narrow pane, and a full deck of crew is never cut off', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
+  const narrow = { ...pane('starfleet-console', 'desktop'), props: { ...pane('starfleet-console', 'desktop').props, bodyColumns: 24 } }
+  const ui = await $.ui.mount(narrow)
+  // Wide drawings carry no fixed size, so the surface scales them to the pane
+  for (const svg of await ui.findAll({ type: 'Svg' })) {
+    const w = (svg.props as { width?: number }).width
+    if (w !== undefined) expect(w).toBeLessThanOrEqual(120)
+  }
+  // Narrow: the button grid goes to 2 columns, section codes hide, and codes never show a double dash
+  const buttons = await ui.findAll({ type: 'Button' })
+  expect(buttons.some(b => b.props.key === 'closure' || (b as { key?: string }).key === 'closure')).toBe(true)
+  const tree = JSON.stringify(await $.ui.render(narrow))
+  expect(tree).toContain('"50%"')
+  expect(tree).not.toMatch(/\d--\d/)
+  // The viewscreen claims more width than any pane, so it fills its slot; its arrow has no hotkey
+  const screen = (await ui.findAll({ type: 'Svg' })).find(x => String(x.props.alt).startsWith('Viewscreen'))
+  expect(String(screen?.props.source)).toContain('width="1600"')
+  expect(screen?.props.isInteractive).toBeUndefined()
+  expect((await ui.find({ type: 'Button', key: 'planet-next' }))?.props.hotkey).toBeUndefined()
+  await ui.unmount()
+  const wide = JSON.stringify(await $.ui.render(pane('starfleet-console', 'desktop')))
+  expect(wide).not.toMatch(/\d--\d/)
+  const crew = Array.from({ length: 8 }, (_, i) => ({ path: `/p${i}`, project: `p${i}`, sprite: 'data', name: 'Data', status: '', deck: 'bridge' as const, isCurrent: false }))
+  const viewBox = /viewBox="0 0 (\d+)/.exec(crewSvg(crew, 0))![1]!
+  expect(Number(viewBox)).toBeGreaterThanOrEqual(14 + 8 * 66)
+  // Every deck keeps full height and the width depends only on the crew size, so a sprite moving
+  // anywhere (sickbay included) never changes the picture's shape: a picture that changes height
+  // while Claude works makes the pane lose its scroll place
+  const sizeOf = (svg: string) => /viewBox="0 0 (\d+) (\d+)"/.exec(svg)!.slice(1).map(Number)
+  const shapeOf = (svg: string) => /viewBox="[^"]+" width="\d+" height="\d+"/.exec(svg)![0]
+  const onBridge = crew.slice(0, 3)
+  for (const deck of ['science', 'engineering', 'sickbay', 'quarters'] as const) {
+    const moved = onBridge.map((c, i) => (i === 0 ? { ...c, deck } : c))
+    expect(shapeOf(crewSvg(moved, 0))).toBe(shapeOf(crewSvg(onBridge, 0)))
+  }
+  const spread = onBridge.map((c, i) => ({ ...c, deck: (['bridge', 'sickbay', 'quarters'] as const)[i]! }))
+  expect(shapeOf(crewSvg(spread, 0))).toBe(shapeOf(crewSvg(onBridge, 0)))
+  const [w, h] = sizeOf(crewSvg(onBridge, 0))
+  expect(w! / h!).toBeGreaterThan(1.2)
+})
+
+test('a crew member walks to a new deck once; later redraws draw it standing there', async () => {
+  // Every redraw loads the picture afresh and restarts its animations, so a walk left in the
+  // picture replays from the old deck on each redraw and the sprite never gets anywhere
+  const walker = { path: '/walker', project: 'walker', sprite: 'walk-test', name: 'Data', status: '', deck: 'science' as const, isCurrent: false }
+  crewSvg([walker], 1_000)
+  const moved = { ...walker, deck: 'engineering' as const }
+  expect(crewSvg([moved], 2_000)).toContain('@keyframes w0')
+  expect(crewSvg([moved], 2_500)).toContain('@keyframes w0')
+  expect(crewSvg([moved], 5_000)).not.toContain('@keyframes w0')
+  expect(crewSvg([moved], 20_000)).not.toContain('@keyframes w0')
+})
+
+test('an acknowledged briefing stays gone after a reload or reopening the console', async ($, on) => {
+  const store = engine(on)
+  on('fs.read', () => ({ value: '# Handoff\nNext: wire the hub sync' }))
+  on('model.complete', () => ({ value: { isAnswered: true, text: 'LEFT OFF: a\nSTANDING ORDER: b\nWATCH FOR: c', usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }))
+  on('audio.play', () => ({ value: undefined }))
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
+  await ui.press({ key: 'brief' })
+  await ui.press({ key: 'ack' })
+  // Saved for this chat, so a reloaded mod (fresh memory) still reads it
+  expect(store['briefing:sess-1']).toBe(true)
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'starfleet', args: '' })
+  expect(await ui.find({ type: 'Button', key: 'brief' })).toBeFalsy()
+  expect(await ui.find({ type: 'Text', text: /MISSION BRIEFING/ })).toBeFalsy()
+  await ui.unmount()
+})
+
+test('every heading uses the one heading color, and the viewscreen keeps a roomy wide canvas', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
+  for (const id of ['starfleet-crew', 'starfleet-log', 'starfleet-about', 'starfleet-core']) {
+    const ui = await $.ui.mount(pane(id, 'desktop'))
+    // Swatches and title pills (text on a background) all use peach; only warnings differ
+    for (const t of await ui.findAll({ type: 'Text' })) {
+      const bg = (t.props as { backgroundColor?: string }).backgroundColor
+      if (bg && !/RED ALERT|ASSIMILATION|CONDITION /.test(t.text)) expect(bg).toBe('#ffcc99')
+    }
+    await ui.unmount()
+  }
+  // Section headings: bold name like the Captain's log, no number keys; briefing gets the swatch too
+  const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
+  for (const name of ['CREW DECKS', 'MAIN ENGINEERING', 'SERVICE RECORD', 'MISSION BRIEFING', 'CAPTAIN’S LOG']) {
+    expect((await ui.find({ type: 'Text', text: name }))?.props.bold).toBe(true)
+  }
+  for (const id of ['crew', 'core', 'record']) expect((await ui.find({ type: 'Button', key: 'sec-' + id }))?.props.hotkey).toBeUndefined()
+  // In the console each heading swatch matches its block's outline
+  type Node = { type?: string; key?: string; props?: { key?: string; borderColor?: string; backgroundColor?: string; children?: unknown }; children?: unknown }
+  const nodes = (n: unknown): Node[] => (n && typeof n === 'object' ? [n as Node, ...Object.values(n as object).flatMap(nodes)] : [])
+  const tree = nodes(await $.ui.render(pane('starfleet-console', 'desktop')))
+  for (const key of ['b-log', 'box-crew', 'box-core']) {
+    const box = tree.find(n => (n.key ?? n.props?.key) === key && n.props?.borderColor)
+    expect(box).toBeTruthy()
+    const swatch = nodes(box).find(n => n !== box && n.props?.backgroundColor)
+    expect(swatch?.props?.backgroundColor).toBe(box!.props!.borderColor)
+  }
+  const decks = (await ui.findAll({ type: 'Svg' })).find(x => String(x.props.source).includes('DECK 1'))
+  expect(String(decks?.props.source)).toContain('width="1600"')
+  await ui.unmount()
+  const svg = viewscreenSvg('A very long project name here', 'none', undefined, 0)
+  expect(svg).toContain('viewBox="0 0 400 190"')
+})
+
+test('a redraw picks the viewscreen orbit up where it was, instead of restarting it', async () => {
+  // Every redraw loads the picture afresh and restarts its animations, so each one starts its
+  // orbit already as far along as the clock says: 4s into a 16s orbit, then 2s into the next lap
+  const delayOf = (svg: string) => /\.ship\{[^}]*animation-delay:(-?[\d.]+)s/.exec(svg)?.[1]
+  expect(delayOf(viewscreenSvg('MOD', 'none', undefined, 4_000))).toBe('-4')
+  expect(delayOf(viewscreenSvg('MOD', 'none', undefined, 18_000))).toBe('-2')
+  // The same moment always draws the same picture
+  expect(viewscreenSvg('MOD', 'none', undefined, 18_000)).toBe(viewscreenSvg('MOD', 'none', undefined, 18_000))
+})
+
+test('the service record only counts up: a stale or unloaded copy never writes lower numbers', async ($, on) => {
+  const store = engine(on)
+  store.record = { sessions: 3, turns: 5, blocked: 0, scans: 0 }
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  // Another chat has counted far past this one's copy in the meantime
+  store.record = { sessions: 18, turns: 191, blocked: 2, scans: 0 }
+  await callTool($, { tool: 'mcp__starfleet__sensor_scan', target: 'the nebula' })
+  expect(store.record).toEqual({ sessions: 18, turns: 191, blocked: 2, scans: 1 })
+})
+
+// ── UI function review: these three run after every UI change (the ui-function-review skill; what tests can't see is in tests/LIVE-CHECKLIST.md) ──
+
+const ALL_PANES = ['starfleet-console', 'starfleet-crew', 'starfleet-log', 'starfleet-about', 'starfleet-core', 'starfleet-record', 'starfleet-ship', 'starfleet-bridge', 'starfleet-translator']
+
+test('review: what a chat remembers comes back after a reload', async ($, on) => {
+  const toasts: string[] = []
+  const store = engine(on, undefined, undefined, { toasts })
+  // What an earlier load of the mod in this chat left behind
+  store['coreAlert:sess-1'] = { tier: 2, isMemoryAlertRaised: false }
+  store['logDraft:sess-1'] = 'half a thought'
+  store['briefing:sess-1'] = true
+  store.record = { sessions: 18, turns: 191, blocked: 0, scans: 0 }
+  store.consoleOpen = { crew: false, core: true, record: true }
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
+  // Context is still at 75%: the tier was already announced, so no repeat toast
+  expect(toasts.some(t => /Assimilation|Borg/.test(t))).toBe(false)
+  expect((await ui.find({ type: 'Input', key: 'log-0' }))?.props.value).toBe('half a thought')
+  expect(await ui.find({ type: 'Button', key: 'brief' })).toBeFalsy()
+  expect(await ui.find({ type: 'Text', text: /191 missions/ })).toBeTruthy()
+  expect((await ui.find({ type: 'Button', key: 'sec-crew' }))?.text).toBe('▸')
+  await ui.unmount()
+})
+
+test('review: every button in every pane presses without an error, on desktop and terminal', async ($, on) => {
+  engine(on)
+  on('tool.call', () => ({ result: 'ok' }))
+  on('prompt.submit', (_: unknown, e: { text: string }) => ({ text: e.text }))
+  on('prompt.fill', () => ({ isFilled: true }))
+  on('audio.play', () => ({ value: undefined }))
+  on('session.compact', () => ({ skip: 'not in a test' }))
+  on('model.complete', () => ({ value: { isAnswered: true, text: 'LEFT OFF: a\nSTANDING ORDER: b\nWATCH FOR: c', usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }))
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
+  const pressed: string[] = []
+  for (const surface of ['desktop', 'terminal'] as const) {
+    for (const id of ALL_PANES) {
+      const ui = await $.ui.mount(pane(id, surface))
+      const keys = (await ui.findAll({ type: 'Button' })).map(b => (b as { key?: string }).key ?? b.props.key).filter(Boolean) as string[]
+      for (const key of keys) {
+        // A press can redraw the pane (Focus hides the rest): press only what is still drawn
+        if (!(await ui.find({ type: 'Button', key }))) continue
+        await ui.press({ key })
+        pressed.push(`${surface}:${id}:${key}`)
+      }
+      await ui.unmount()
+      // Focus mode hides the console's buttons; come back for the next pane
+      await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'starfleet', args: '' })
+    }
+  }
+  expect(pressed.length).toBeGreaterThan(20)
+})
+
+test('review: every pane draws at narrow, medium and wide widths without fixed-size pictures', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
+  for (const surface of ['desktop', 'terminal'] as const) {
+    for (const id of ALL_PANES) {
+      for (const bodyColumns of [24, 50, 120]) {
+        const p = pane(id, surface)
+        const ui = await $.ui.mount({ ...p, props: { ...p.props, bodyColumns } })
+        // Small fixed art (the core, rank pips) may keep its size; anything wider must scale to the pane
+        for (const svg of await ui.findAll({ type: 'Svg' })) {
+          const w = (svg.props as { width?: number }).width
+          if (w !== undefined) expect(w).toBeLessThanOrEqual(160)
+        }
+        await ui.unmount()
+      }
+    }
+  }
+})
+
+test('review: lines that change while Claude works are one line each, and nothing appears mid-turn', async ($, on) => {
+  engine(on)
+  on('prompt.submit', (_: unknown, e: { text: string }) => ({ text: e.text }))
+  on('model.complete', () => new Promise(() => {}))
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const narrow = { ...pane('starfleet-console', 'desktop'), props: { ...pane('starfleet-console', 'desktop').props, bodyColumns: 30 } }
+  const ui = await $.ui.mount(narrow)
+  // A long prompt waits for its summary: no extra 'Summarizing' line comes and goes
+  await $.prompt.submit({ text: 'please look into why the console scroll position jumps around while you are working' } as never)
+  expect(await ui.find({ type: 'Text', text: /Summarizing/ })).toBeFalsy()
+  for (const label of [/TIME LOG/, /ORDERS/, /CORE LOAD/, /DILITHIUM/, /WARP DRIVE/]) {
+    const line = (await ui.findAll({ type: 'Text' })).find(t => label.test(t.text) && (t.props as { wrap?: string }).wrap)
+    expect((line?.props as { wrap?: string } | undefined)?.wrap).toBe('truncate')
+  }
+  expect(await ui.find({ type: 'Text', text: /this mission/ })).toBeFalsy()
+  await ui.unmount()
+})
+
+test('a stardate is month and day, then the year', () => {
+  expect(stardate(new Date(2026, 9, 27, 10, 54).getTime())).toBe('1027.26')
+  expect(stardate(new Date(2030, 0, 5).getTime())).toBe('0105.30')
+})
+
 test('only a test or build command counts as diagnostics', async () => {
   for (const ran of ['npm test', 'cd app && pnpm run build', 'pytest -q', 'tsc -p .', 'make', 'claude plugin test .']) expect(TEST_OR_BUILD.test(ran)).toBe(true)
   for (const other of ['grep -rn make src', 'git commit -m "fix tsc"', 'echo pytest', 'cat Makefile']) expect(TEST_OR_BUILD.test(other)).toBe(false)
 })
 
-test('neighbors in the crew line-up never share a shirt color', async ($, on) => {
+test('a crew member keeps its sprite for good; only newcomers avoid a neighbor\'s shirt color', async ($, on) => {
   const store = engine(on)
-  store.crewAssign = { '/Users/cap/MOD': 'data', '/Users/cap/old-app': 'geordi' }
+  // Both wear yellow and stand side by side: neither is switched
+  store.crewAssign = { '/Users/cap/MOD': 'data', '/Users/cap/old/app': 'geordi' }
   await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
-  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
-  const crew = store.crew as { sprite: string }[]
+  const run = $.command.run as (input: { command: string; args: string }) => Promise<unknown>
+  await run({ command: 'crew', args: '' })
+  expect((store.crew as { sprite: string }[]).map(c => c.sprite)).toEqual(['data', 'geordi'])
+  // A newcomer next to a yellow shirt picks another color
+  store.crewAssign = { '/Users/cap/MOD': 'data' }
+  await run({ command: 'crew', args: '' })
   const shirt: Record<string, string> = { picard: 'r', riker: 'r', data: 'y', geordi: 'y', worf: 'y', seven: 'g', troi: 'p', crusher: 't' }
-  for (let i = 1; i < crew.length; i++) expect(shirt[crew[i]!.sprite]).not.toBe(shirt[crew[i - 1]!.sprite])
-  expect(crew.map(c => c.sprite)).not.toContain('geordi')
+  const crew = store.crew as { sprite: string }[]
+  expect(crew[0]!.sprite).toBe('data')
+  expect(shirt[crew[1]!.sprite]).not.toBe('y')
 })
 
 test('a deck another chat posts moves that project on every console', async ($, on) => {
@@ -527,4 +1081,219 @@ test('with AI summaries off, nothing is sent to a model for titles or briefings'
   expect(asked).toEqual([])
   // The title comes from the prompt's own first line instead
   expect((store['lastPrompt:' + sessionId] as { summary?: string }).summary).toContain('Please look into why the warp core')
+})
+
+test('eject asks for a handoff that replaces the last one and drops nothing', async ($, on) => {
+  engine(on)
+  on('audio.play', () => ({ value: undefined }))
+  on('clock.after', () => ({ value: undefined }))
+  const sent: string[] = []
+  on('prompt.submit', (_: unknown, e: { text: string }) => { sent.push(e.text); return { text: e.text } })
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  // The first press arms the core; the second ejects it
+  const core = await $.ui.mount(pane('starfleet-core', 'desktop'))
+  await core.press({ key: 'eject' })
+  await core.press({ key: 'eject' })
+  await new Promise(done => setTimeout(done, 20))
+  const ask = sent.find(t => t.includes('handoff document'))!
+  expect(ask).toContain('Replaces:')
+  expect(ask).toContain('Never edit it or any other earlier handoff')
+  expect(ask).toContain('Nothing is dropped silently')
+  expect(ask).toContain('Each item goes in exactly one section')
+  expect(ask).toContain('To try')
+  for (const section of ['Goal', 'Gotchas', 'How to verify']) expect(ask).toContain(section)
+  expect(ask).toContain('go into memory or CLAUDE.md, not the handoff')
+  await core.unmount()
+})
+
+test('from 70% the core asks once per tier whether the work is mid-task, and recommends compact or eject', async ($, on) => {
+  const store = engine(on)
+  on('audio.play', () => ({ value: undefined }))
+  on('session.measure', () => ({ changed: [] }))
+  on('session.compact', () => ({ skip: 'not in a test' }))
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const measure = $.session.measure as unknown as (input: object) => Promise<unknown>
+  const context = (percent: number) => ({ context: { tokens: percent * 2000, window: 200000, percent } })
+
+  // 75%: the band asks, and offers no move until answered
+  let ui = await $.ui.mount(band('desktop', false))
+  expect(await ui.find({ type: 'Text', text: /Still mid-task/ })).toBeTruthy()
+  expect(await ui.find({ type: 'Button', key: 'band-compact' })).toBeFalsy()
+  await ui.press({ key: 'band-mid' })
+  expect(await ui.find({ type: 'Text', text: /Still mid-task/ })).toBeFalsy()
+  expect(await ui.find({ type: 'Button', key: 'band-compact' })).toBeTruthy()
+  expect(await ui.find({ type: 'Button', key: 'band-eject' })).toBeFalsy()
+  expect((store['coreAlert:sess-1'] as { advice?: unknown }).advice).toEqual({ tier: 2, answer: 'mid' })
+  await ui.unmount()
+
+  // The warp core pane shows the same recommendation
+  const core = await $.ui.mount(pane('starfleet-core', 'desktop'))
+  expect(await core.find({ type: 'Text', text: /Recommended: Compact/ })).toBeTruthy()
+  expect(await core.find({ type: 'Button', key: 'mid' })).toBeFalsy()
+  await core.unmount()
+
+  // 87%: a new tier asks again; done recommends eject
+  await measure(context(87))
+  ui = await $.ui.mount(band('desktop', false))
+  expect(await ui.find({ type: 'Text', text: /Still mid-task/ })).toBeTruthy()
+  await ui.press({ key: 'band-done' })
+  expect(await ui.find({ type: 'Button', key: 'band-eject' })).toBeTruthy()
+  expect(await ui.find({ type: 'Button', key: 'band-compact' })).toBeFalsy()
+  await ui.unmount()
+})
+
+test('an answered mid-task question stays answered after a reload', async ($, on) => {
+  const store = engine(on)
+  store['coreAlert:sess-1'] = { tier: 2, isMemoryAlertRaised: false, advice: { tier: 2, answer: 'done' } }
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount(band('terminal', false))
+  expect(await ui.find({ type: 'Text', text: /Still mid-task/ })).toBeFalsy()
+  expect(await ui.find({ type: 'Button', key: 'band-eject' })).toBeTruthy()
+  await ui.unmount()
+})
+
+test('dilithium shows the window Claude Code reports, not one worked out from a rounded percent', async ($, on) => {
+  engine(on)
+  on('session.measure', () => ({ changed: [] }))
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const measure = $.session.measure as unknown as (input: object) => Promise<unknown>
+  // 150.5k of a 1M window rounds to 15%, which would read as 1003k
+  await measure({ context: { tokens: 150500, window: 1000000, percent: 15 } })
+  const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
+  expect(await ui.find({ type: 'Text', text: /151k of 1000k tokens/ })).toBeTruthy()
+  await ui.unmount()
+})
+
+test('the captain\'s log is gold and the crew decks grey, and the readout labels are bold', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
+  expect((await ui.find({ type: 'Box', key: 'b-log' }))?.props.borderColor).toBe('#ffcc33')
+  expect((await ui.find({ type: 'Box', key: 'box-crew' }))?.props.borderColor).toBe('#8c8a96')
+  // No other block borrows the log's gold or the crew's grey
+  for (const key of ['b-view', 'b-status', 'box-core', 'box-record']) {
+    expect(['#ffcc33', '#8c8a96']).not.toContain((await ui.find({ type: 'Box', key }))?.props.borderColor)
+  }
+  // The service record starts folded; open it to see its readouts
+  if (!(await ui.find({ type: 'Text', text: /MISSIONS/ }))) await ui.press({ key: 'sec-record' })
+  const texts = await ui.findAll({ type: 'Text' })
+  for (const label of ['COURSE', 'TIME LOG', 'ORDERS', 'CORE LOAD', 'DILITHIUM', 'CONDITION', 'WARP DRIVE', 'MISSIONS', 'TOURS', 'DEFLECTED', 'SCANS']) {
+    const t = texts.find(x => x.text.trim() === label)
+    expect(t ? `${label}:${(t.props as { bold?: boolean }).bold}` : `${label}:missing`).toBe(`${label}:true`)
+  }
+  expect(await ui.find({ type: 'Text', text: /^ CONDITION (GREEN|YELLOW|BORG|RED) $/ })).toBeTruthy()
+  await ui.unmount()
+})
+
+test('Record sits right of the log field at every width, and the field takes the room left', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  type Node = { type?: string; key?: string; props?: Record<string, unknown> & { children?: unknown }; children?: unknown }
+  const kids = (n: Node): Node[] => ([] as unknown[]).concat(n.children ?? n.props?.children ?? []).filter(Boolean) as Node[]
+  const has = (n: Node, test: (x: Node) => boolean): boolean => test(n) || kids(n).some(k => has(k, test))
+  const isField = (x: Node) => x.type === 'Input' && String(x.key ?? x.props?.key ?? '').startsWith('log-')
+  const isRecord = (x: Node) => x.type === 'Button' && (x.key ?? x.props?.key) === 'record'
+  // The row whose children hold the field and Record, side by side
+  const rowOf = (n: Node): Node | undefined =>
+    kids(n).some(k => has(k, isField)) && kids(n).some(k => has(k, isRecord)) && !kids(n).some(k => has(k, isField) && has(k, isRecord))
+      ? n : kids(n).map(rowOf).find(Boolean)
+  for (const bodyColumns of [24, 50, 120]) {
+    const p = pane('starfleet-console', 'desktop')
+    const tree = await $.ui.render({ ...p, props: { ...p.props, bodyColumns } }) as unknown as Node
+    const row = rowOf(tree)
+    expect(row?.props?.flexDirection).toBe('row')
+    const [field, record] = kids(row!)
+    expect(has(field!, isField) && field!.props?.flexGrow === 1 && field!.props?.minWidth === 0).toBe(true)
+    expect(has(record!, isRecord) && record!.props?.flexShrink === 0).toBe(true)
+  }
+})
+
+test('the course line says in plain words when the last check passed or failed', () => {
+  const base = { startedAt: 0, warpMs: 0, orders: 0, files: ['a.ts'], scans: 0, greenBuilds: 3, commits: 0 }
+  const now = 10 * 60000
+  expect(courseOf({ ...base, lastBuild: 'pass', lastBuildAt: now - 4 * 60000 }, now).detail).toBe('1 file changed · tests passed 3 times · last check passed 4m ago')
+  const breach = courseOf({ ...base, lastBuild: 'fail', lastBuildAt: now - 30000 }, now)
+  expect(breach.label).toBe('HULL BREACH')
+  expect(breach.detail).toBe('last check failed just now · 1 file changed · tests passed 3 times')
+  // A voyage saved before checks had a time still reads
+  expect(courseOf({ ...base, lastBuild: 'pass', lastBuildAt: null }, now).detail).toContain('last check passed')
+})
+
+test('Guinan\'s ale and Riker\'s circle are handed out last, after every square', () => {
+  expect(SPRITE_ORDER.slice(-2)).toEqual(['guinan', 'riker'])
+  expect(SPRITES.guinan!.emoji).toBe('🍺')
+  expect(SPRITES.q!.emoji).toBe('⬛')
+  for (const key of SPRITE_ORDER.slice(0, -2)) expect(['🟥', '🟧', '🟨', '🟩', '🟦', '🟪', '🟫', '⬛', '⬜']).toContain(SPRITES[key]!.emoji)
+  for (const key of SPRITE_ORDER) expect(SPRITE_COLORS[key]).toMatch(/^#[0-9a-f]{6}$/)
+})
+
+test('the default planet is drawn in the project\'s crew color; a picked planet keeps its own', () => {
+  const troi = SPRITE_COLORS.troi!
+  expect(viewscreenSvg('MOD', 'none', undefined, 0, troi)).toContain(troi)
+  expect(viewscreenSvg('MOD', 'none', 'classm', 0, troi)).not.toContain(troi)
+})
+
+test('an ale tag, or the heart Guinan had before it, is swapped like any other crew tag', () => {
+  expect(taggedTitle('🍺 Old chat', '🟩')).toBe('🟩 Old chat')
+  expect(taggedTitle('🩷 Old chat', '🍺')).toBe('🍺 Old chat')
+})
+
+test('after /clear the new chat gets its own warp core question and an empty log draft', async ($, on) => {
+  const store = engine(on)
+  on('session.measure', () => ({ changed: [] }))
+  store['logDraft:sess-1'] = 'old chat draft'
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  let ui = await $.ui.mount(band('desktop', false))
+  await ui.press({ key: 'band-done' })
+  await ui.unmount()
+  // /clear: same process, new chat id
+  sessionId = 'sess-clear'
+  try {
+    await ($.session.measure as unknown as (input: object) => Promise<unknown>)({ context: { tokens: 150000, window: 200000, percent: 75 } })
+    ui = await $.ui.mount(band('desktop', false))
+    expect(await ui.find({ type: 'Text', text: /Still mid-task/ })).toBeTruthy()
+    await ui.unmount()
+    const consolePane = await $.ui.mount(pane('starfleet-console', 'desktop'))
+    const field = (await consolePane.findAll({ type: 'Input' })).find(i => String((i as { key?: string }).key ?? i.props.key).startsWith('log-'))
+    expect(field?.props.value).toBe('')
+    await consolePane.unmount()
+  } finally {
+    sessionId = 'sess-1'
+  }
+})
+
+test('once a compact drops the load, climbing back past 70% asks again', async ($, on) => {
+  engine(on)
+  on('session.measure', () => ({ changed: [] }))
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const measure = $.session.measure as unknown as (input: object) => Promise<unknown>
+  const context = (percent: number) => ({ context: { tokens: percent * 2000, window: 200000, percent } })
+  let ui = await $.ui.mount(band('desktop', false))
+  await ui.press({ key: 'band-mid' })
+  await ui.unmount()
+  await measure(context(20))
+  await measure(context(74))
+  ui = await $.ui.mount(band('desktop', false))
+  expect(await ui.find({ type: 'Text', text: /Still mid-task/ })).toBeTruthy()
+  await ui.unmount()
+})
+
+test('condition Borg is orange, never the all-clear green', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
+  const badge = await ui.find({ type: 'Text', text: /^ CONDITION BORG $/ })
+  expect(badge?.props.backgroundColor).toBe('#ff9966')
+  await ui.unmount()
+})
+
+test('a worktree chat counts as its project\'s crew member, so the planet takes the crew color', async ($, on) => {
+  const store = engine(on, undefined, undefined, { cwd: '/Users/cap/MOD/.claude/worktrees/fix-1' })
+  await $.session.start({ cwd: '/Users/cap/MOD/.claude/worktrees/fix-1', surface: 'desktop', isInteractive: true })
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
+  const mod = (store.crew as { path: string; sprite: string }[]).find(c => c.path === '/Users/cap/MOD')!
+  const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
+  const screen = (await ui.findAll({ type: 'Svg' })).find(s => String(s.props.alt ?? '').startsWith('Viewscreen'))
+  expect(String(screen?.props.source)).toContain(SPRITE_COLORS[mod.sprite]!)
+  await ui.unmount()
 })

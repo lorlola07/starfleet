@@ -6,12 +6,16 @@ export function isHubUrl(url: string): boolean {
   return /^https:\/\/claude\.ai\/(code\/)?artifact\/[A-Za-z0-9-]+\/?$/.test(url)
 }
 
-// The actual local date and time, written as a stardate: 2026.1025.2332 is 25 Oct 2026, 23:32
+// The actual local date, written as a stardate: month and day, then the year's last two digits.
+// 1027.26 is 27 Oct 2026
 export function stardate(ms: number): string {
   const d = new Date(ms)
   const two = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}.${two(d.getMonth() + 1)}${two(d.getDate())}.${two(d.getHours())}${two(d.getMinutes())}`
+  return `${two(d.getMonth() + 1)}${two(d.getDate())}.${two(d.getFullYear() % 100)}`
 }
+
+// A worktree session counts for the project it was cut from
+export const projectOf = (cwd: string | undefined) => cwd?.replace(/\/\.claude\/worktrees\/.*$/, '')
 
 export function basename(path: string): string {
   return path.replace(/\/+$/, '').split('/').pop() || path
@@ -37,21 +41,50 @@ export function pixels(rows: readonly string[], palette: Record<string, string>,
 export const CREW_PALETTE: Record<string, string> = {
   s: '#f2c6a8', d: '#8a4a2a', a: '#f3e3c0', r: '#e0443e', y: '#e8a33a', g: '#b9b6c4', h: '#f6cf6a',
   k: '#1c1c22', v: '#8c8a96', b: '#3a2a22', t: '#4aa3c7', n: '#6b3e24', p: '#9b6bb5',
+  f: '#e88fb4', x: '#34343e', u: '#4caf50', q: '#e0a070',
 }
 
 // Same maps as the Starfleet Command hub, so a crew member looks the same everywhere
-export const SPRITES: Record<string, { name: string; rows: string[] }> = {
-  picard: { name: 'Picard', rows: ['..ssss..', '.ssssss.', '.sksskk.', '.ssssss.', '..ssss..', '.rrrrrr.', 'rkrrrrkr', 'rrrrrrrr', '.kk..kk.'] },
-  data: { name: 'Data', rows: ['..kkkk..', '.kaaaak.', '.akaaka.', '.aaaaaa.', '..aaaa..', '.yyyyyy.', 'ykyyyyky', 'yyyyyyyy', '.kk..kk.'] },
-  geordi: { name: 'Geordi', rows: ['..kkkk..', '.dddddd.', '.vvvvvv.', '.dddddd.', '..dddd..', '.yyyyyy.', 'ykyyyyky', 'yyyyyyyy', '.kk..kk.'] },
-  worf: { name: 'Worf', rows: ['.bbbbbb.', 'bdddddbb', 'bdkddkdb', 'bddddddb', '.dddddd.', '.yyyyyy.', 'ygyyyyyy', 'yyyyyyyy', '.kk..kk.'] },
-  seven: { name: 'Seven', rows: ['..hhhh..', '.hhhhhh.', 'hskssksh', 'hssssssh', '..ssss..', '.gggggg.', 'gggggggg', '.gggggg.', '.gg..gg.'] },
-  riker: { name: 'Riker', rows: ['..nnnn..', '.nssssn.', '.sksskk.', '.nnnnnn.', '..nnnn..', '.rrrrrr.', 'rkrrrrkr', 'rrrrrrrr', '.kk..kk.'] },
-  troi: { name: 'Troi', rows: ['.kkkkkk.', 'kkssssk.', 'kskssksk', 'kssssssk', 'k.ssss.k', '.pppppp.', 'pppppppp', '.pppppp.', '.pp..pp.'] },
-  crusher: { name: 'Crusher', rows: ['.rrrrrr.', 'rrssssrr', 'rskssksr', '.ssssss.', '..ssss..', '.tttttt.', 'tkttttkt', 'tttttttt', '.kk..kk.'] },
+export const SPRITES: Record<string, { name: string; emoji: string; rows: string[] }> = {
+  picard: { name: 'Picard', emoji: '🟥', rows: ['..ssss..', '.ssssss.', '.sksskk.', '.ssssss.', '..ssss..', '.rrrrrr.', 'rkrrrrkr', 'rrrrrrrr', '.kk..kk.'] },
+  data: { name: 'Data', emoji: '🟧', rows: ['..kkkk..', '.kaaaak.', '.akaaka.', '.aaaaaa.', '..aaaa..', '.yyyyyy.', 'ykyyyyky', 'yyyyyyyy', '.kk..kk.'] },
+  geordi: { name: 'Geordi', emoji: '🟨', rows: ['..kkkk..', '.dddddd.', '.vvvvvv.', '.dddddd.', '..dddd..', '.yyyyyy.', 'ykyyyyky', 'yyyyyyyy', '.kk..kk.'] },
+  worf: { name: 'Worf', emoji: '🟫', rows: ['.bbbbbb.', 'bdddddbb', 'bdkddkdb', 'bddddddb', '.dddddd.', '.yyyyyy.', 'ygyyyyyy', 'yyyyyyyy', '.kk..kk.'] },
+  seven: { name: 'Seven', emoji: '⬜', rows: ['..hhhh..', '.hhhhhh.', 'hskssksh', 'hssssssh', '..ssss..', '.gggggg.', 'gggggggg', '.gggggg.', '.gg..gg.'] },
+  riker: { name: 'Riker', emoji: '🔴', rows: ['..nnnn..', '.nssssn.', '.sksskk.', '.nnnnnn.', '..nnnn..', '.rrrrrr.', 'rkrrrrkr', 'rrrrrrrr', '.kk..kk.'] },
+  troi: { name: 'Troi', emoji: '🟪', rows: ['.kkkkkk.', 'kkssssk.', 'kskssksk', 'kssssssk', 'k.ssss.k', '.pppppp.', 'pppppppp', '.pppppp.', '.pp..pp.'] },
+  // Guinan tends bar in Ten Forward, so her tag is an ale rather than a square; like Riker's circle,
+  // it comes late in the order
+  guinan: { name: 'Guinan', emoji: '🍺', rows: ['.ffffff.', 'ffffffff', '.dddddd.', '.dkddkd.', '..dddd..', '.ffffff.', 'ffffffff', 'ffffffff', '.ff..ff.'] },
+  // Q in his court robe (black, gold chain of office)
+  q: { name: 'Q', emoji: '⬛', rows: ['..nnnn..', '.nssssn.', '.skssks.', '.ssssss.', '..ssss..', '.xhhhhx.', 'xxxhhxxx', 'xxxxxxxx', '.xx..xx.'] },
+  quark: { name: 'Quark', emoji: '🟩', rows: ['..qqqq..', 'q.qqqq.q', 'qqkqqkqq', 'qqqqqqqq', '..qqqq..', '.uuuuuu.', 'uhuuuuhu', 'uuuuuuuu', '.kk..kk.'] },
+  crusher: { name: 'Crusher', emoji: '🟦', rows: ['.rrrrrr.', 'rrssssrr', 'rskssksr', '.ssssss.', '..ssss..', '.tttttt.', 'tkttttkt', 'tttttttt', '.kk..kk.'] },
 }
 // Handed out in this order; neighbors in it never share a shirt color
-export const SPRITE_ORDER = ['picard', 'data', 'troi', 'crusher', 'seven', 'geordi', 'riker', 'worf']
+// Each crew member's tag, near their uniform color: shown on the crew decks and in front of
+// the name of every chat in that member's project, so a chat and its crew member match
+const TAG_EMOJI = /^(?:(?:\u{1F7E5}|\u{1F7E7}|\u{1F7E8}|\u{1F7E9}|\u{1F7E6}|\u{1F7EA}|\u{1F7EB}|\u2B1B|\u2B1C|\u{1F37A}|\u{1FA77}|\u{1F534}|\u{1F7E0}|\u{1F7E1}|\u{1F7E2}|\u{1F535}|\u{1F7E3}|\u{1F7E4}|\u26AB|\u26AA)\uFE0F?\s*)+/u
+export function taggedTitle(title: string, emoji: string): string {
+  return `${emoji} ${title.replace(TAG_EMOJI, '').trim() || 'New session'}`
+}
+
+// The title with any crew emoji taken off the front; an untagged title comes back as it was
+export function untaggedTitle(title: string): string {
+  return TAG_EMOJI.test(title) ? title.replace(TAG_EMOJI, '').trim() || 'New session' : title
+}
+
+// The squares come first. Guinan's ale and Riker's circle come last: Riker is the backup, since his
+// red matches Picard's
+export const SPRITE_ORDER = ['picard', 'data', 'troi', 'geordi', 'crusher', 'worf', 'quark', 'seven', 'q', 'guinan', 'riker']
+
+// Each crew member's one color, the color of their tag: their project's default planet is drawn in it,
+// so the chat's tag, the crew member and the viewscreen all match
+export const SPRITE_COLORS: Record<string, string> = {
+  picard: '#e0443e', data: '#f08a2c', geordi: '#f2c94c', worf: '#8a4a2a',
+  seven: '#e9e6f0', riker: '#e0443e', troi: '#9b6bb5', crusher: '#4aa3c7',
+  guinan: '#e88fb4', quark: '#4caf50', q: '#34343e',
+}
 
 // The 8-bit placeholder ship, flying right. Swap these rows for your own art.
 export const SHIP_ROWS = [

@@ -23,9 +23,14 @@ test('shields catch destructive commands however they are written', async () => 
     'ssh host rm -rf x', "ssh host 'git push -f'", 'watch "rm -rf x"', 'su -c "rm -rf x"', 'env -S "rm -rf x"',
     // ANSI-C quoting
     "$'\\x72\\x6d' -rf x", "$'rm' -rf x",
-    // a here-document's body is judged whoever reads it: a wrapped shell, a pipe into one, or a file
+    // a here-document's body is judged when a shell reads it: directly, wrapped, or through a pipe
     'bash <<EOF\nrm -rf x\nEOF', 'sudo bash <<EOF\nrm -rf x\nEOF', 'cat <<EOF | bash\nrm -rf x\nEOF',
-    'cat <<EOF > notes.md\nrm -rf x\nEOF',
+    "bash <<'EOF'\ngit reset --hard\nEOF", 'zsh <<-EOF\n\tgit push -f\n\tEOF', 'source /dev/stdin <<EOF\nrm -rf x\nEOF',
+    // a << in arithmetic is a shift, not a here-document, so the next line is still judged
+    '(( y = 1<<2 ))\nrm -rf x\n2', 'echo $[1<<2]\nrm -rf x\n2', 'x=$((1<<2))\nrm -rf x', '((cd a; rm -rf x))',
+    '(( $(rm -rf x) ))',
+    // an unquoted body still runs its $(…) and `…`
+    'cat <<EOF > notes.md\n$(rm -rf x)\nEOF', 'cat <<EOF > notes.md\nsee `git reset --hard`\nEOF',
     // a stray quote in a here-document's body can't hide the command after its closing line
     "cat <<EOF\n'\nEOF\nrm -rf x\n'", 'cat <<EOF\n"\nEOF\ngit reset --hard\n"',
   ]
@@ -42,7 +47,19 @@ test('shields let ordinary commands through, even ones that mention danger', asy
     'cat <<EOF > notes.md\nhello\nEOF', 'npm run build\nnpm test', 'git commit -m "Fix the band\n\nIt now shows other plugins"',
     'gh pr create --body "rm -rf is dangerous"', 'npm run build', 'node -e "console.log(1)"', 'ssh host ls',
   ]
+  // A here-document's body that no shell reads is only text: notes, docs and scripts for other languages
+  const text = [
+    'cat <<EOF > notes.md\nrm -rf x\nEOF',
+    "cat > f.md <<'EOF'\nlike `git reset --hard` here\nEOF",
+    "cat > f.md <<'EOF'\nyou'd use git reset --hard\nEOF",
+    "python3 - <<'EOF'\nprint(\"git reset --hard\")\nEOF",
+    "cat <<\"EOF\" > a.md\n$(rm -rf x)\nEOF",
+    "cat <<'A' > a.md && cat <<'B' > b.md\ngit push -f\nA\nrm -rf ~\nB",
+    "grep x <<<'rm -rf x'",
+  ]
+  for (const command of text) expect([command, hostileReason(command)]).toEqual([command, undefined])
   // What follows a here-document is judged too
   expect(hostileReason('cat <<EOF > a.md\nhello\nEOF\ngit reset --hard')).toBe('git reset --hard')
+  expect(hostileReason("cat <<'EOF' > a.md\nit's\nEOF\nrm -rf x")).toBe('a forced recursive delete')
   for (const command of allowed) expect([command, hostileReason(command)]).toEqual([command, undefined])
 })

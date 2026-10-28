@@ -4,16 +4,26 @@
 // shell words the way the shell would (quotes, escapes, ; && || | and newlines), and only the words
 // in command position are judged, so `echo "rm -rf x"` or a commit message naming a forced push is
 // left alone. Nested shells (bash -c, sh -c, eval, $(…), `…`, <(…)) and wrappers (sudo, env, xargs…)
-// are looked inside. A script file the command runs is not.
+// are looked inside, and so is a here-document a shell reads. A script file the command runs is not,
+// and a here-document no shell reads is text, like a quoted string.
 
 const MAX_DEPTH = 4
 
-type Parsed = { segments: string[][]; nested: string[] }
+// A here-document: its body, whether its delimiter was quoted (<<'EOF': the shell expands nothing in
+// it), and the segments of the line that started it (whoever reads the body)
+type HereDoc = { body: string; quoted: boolean; line: string[][] }
+type Parsed = { segments: string[][]; nested: string[]; heredocs: HereDoc[]; outside: string }
 
-// Split a command into segments of unquoted words, and collect the text of every $(…), `…` and <(…)
+// Split a command into segments of unquoted words, and collect the text of every $(…), `…` and <(…),
+// and every here-document's body. `outside` is the command with the bodies taken out
 export function parse(command: string): Parsed {
   const segments: string[][] = []
   const nested: string[] = []
+  const heredocs: HereDoc[] = []
+  const pending: { delim: string; quoted: boolean; tabs: boolean }[] = []
+  let outside = ''
+  let copied = 0
+  let lineStart = 0
   let seg: string[] = []
   let word: string | null = null
   let i = 0
@@ -59,6 +69,62 @@ export function parse(command: string): Parsed {
     return undefined
   }
 
+  // The delimiter word after << (or <<-) at `from`: quotes and escapes are taken off, and any of them
+  // makes it a quoted delimiter
+  const delimiter = (from: number) => {
+    let j = from
+    while (command[j] === ' ' || command[j] === '\t') j++
+    let delim = ''
+    let quoted = false
+    while (j < command.length && !/[\s;&|<>()]/.test(command[j]!)) {
+      const c = command[j]!
+      if (c === "'" || c === '"') {
+        const end = command.indexOf(c, j + 1)
+        delim += command.slice(j + 1, end < 0 ? undefined : end)
+        quoted = true
+        j = end < 0 ? command.length : end + 1
+      } else if (c === '\\') {
+        delim += command[j + 1] ?? ''
+        quoted = true
+        j += 2
+      } else {
+        delim += c
+        j++
+      }
+    }
+    return { delim, quoted, end: j }
+  }
+
+  // At the start of the line after a here-document's command: read each pending body up to its
+  // delimiter line. An unquoted body still runs its $(…) and `…`, so those are collected
+  const readBodies = () => {
+    const line = segments.slice(lineStart)
+    for (const doc of pending.splice(0)) {
+      const start = i
+      const lines: string[] = []
+      while (i < command.length) {
+        const nl = command.indexOf('\n', i)
+        const text = command.slice(i, nl < 0 ? undefined : nl)
+        i = nl < 0 ? command.length : nl + 1
+        if ((doc.tabs ? text.replace(/^\t+/, '') : text) === doc.delim) break
+        lines.push(text)
+      }
+      if (!doc.quoted) {
+        const saved = word
+        for (let j = start; j < i; j++) {
+          if (command[j] === '\\') { j++; continue }
+          const end = substitution(j)
+          if (end !== undefined) j = end - 1
+        }
+        word = saved
+      }
+      heredocs.push({ body: lines.join('\n'), quoted: doc.quoted, line })
+      outside += command.slice(copied, start)
+      copied = i
+    }
+    lineStart = segments.length
+  }
+
   while (i < command.length) {
     const c = command[i]!
     const sub = substitution(i)
@@ -78,8 +144,34 @@ export function parse(command: string): Parsed {
       i = end < 0 ? command.length : end + 1
       continue
     }
-    // A here-document's body is read line by line like any other commands (fail closed): telling
-    // text from a body a shell will run is not something a seatbelt can do reliably
+    // Arithmetic, (( … )) or $[ … ], is one word: a << in it is a shift, never a here-document. Any
+    // $(…) or `…` inside still runs, so those are collected
+    if ((c === '(' && command[i + 1] === '(') || (c === '$' && command[i + 1] === '[')) {
+      let end = c === '(' ? closeParen(i) : command.indexOf(']', i + 2)
+      if (end < 0) end = command.length
+      const saved = word
+      for (let j = i + 2; j < end; j++) {
+        if (command[j] === '\\') { j++; continue }
+        const after = substitution(j)
+        if (after !== undefined) j = after - 1
+      }
+      word = saved
+      // bash rereads a (( that isn't arithmetic as two subshells, so the inside is judged as commands too
+      if (c === '(') nested.push(command.slice(i + 1, end))
+      endWord()
+      add('((…))')
+      i = end + 1
+      continue
+    }
+    // << starts a here-document (<<< is a here-string, an ordinary word)
+    if (c === '<' && command[i + 1] === '<' && command[i + 2] !== '<') {
+      endWord()
+      const tabs = command[i + 2] === '-'
+      const { delim, quoted, end } = delimiter(i + (tabs ? 3 : 2))
+      if (delim) pending.push({ delim, quoted, tabs })
+      i = end
+      continue
+    }
     if (c === '"') {
       add('')
       i++
@@ -94,13 +186,15 @@ export function parse(command: string): Parsed {
       continue
     }
     if (c === '#' && word === null) { while (i < command.length && command[i] !== '\n') i++; continue }
-    if (';&|\n()'.includes(c)) { endSeg(); i++; continue }
+    if (c === '\n') { endSeg(); i++; readBodies(); continue }
+    if (';&|()'.includes(c)) { endSeg(); i++; continue }
     if (/\s/.test(c)) { endWord(); i++; continue }
     add(c)
     i++
   }
   endSeg()
-  return { segments, nested }
+  outside += command.slice(copied)
+  return { segments, nested, heredocs, outside }
 }
 
 const ESCAPES: Record<string, string> = { n: '\n', t: '\t', r: '\r', a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', v: '\v' }
@@ -116,7 +210,7 @@ function decodeAnsiC(body: string): string {
 // The reason Tactical refuses the command, or undefined when it may run
 export function hostileReason(command: string, depth = 0): string | undefined {
   if (depth > MAX_DEPTH) return 'a command nested too deep to read'
-  const { segments, nested } = parse(command)
+  const { segments, nested, heredocs, outside } = parse(command)
   for (const words of segments) {
     const reason = judge(words, depth)
     if (reason) return reason
@@ -125,10 +219,17 @@ export function hostileReason(command: string, depth = 0): string | undefined {
     const reason = hostileReason(inner, depth + 1)
     if (reason) return reason
   }
-  // Each line on its own too, so a quote opened in a here-document's body (or any stray quote)
-  // can't hide the lines after it: fail closed, at the cost of judging a multi-line string's lines
-  if (command.includes('\n')) {
-    for (const line of command.split('\n')) {
+  // A here-document's body is only text, unless a shell on its line reads it (bash <<EOF, or
+  // cat <<EOF | bash): then every line of it is a command
+  for (const doc of heredocs) {
+    const toShell = doc.line.some(words => words.some(w => SHELL_READERS.has(nameOf(w))))
+    const reason = toShell ? hostileReason(doc.body, depth + 1) : undefined
+    if (reason) return reason
+  }
+  // Each line outside the here-documents on its own too, so a stray quote can't hide the lines after
+  // it: fail closed, at the cost of judging a multi-line string's lines
+  if (outside.includes('\n')) {
+    for (const line of outside.split('\n')) {
       const reason = line.trim() ? hostileReason(line, depth + 1) : undefined
       if (reason) return reason
     }
@@ -170,6 +271,8 @@ const RUNS_STRING = new Set(['su', 'runuser', 'script'])
 const TEXT_ONLY = new Set(['echo', 'printf', 'grep', 'egrep', 'fgrep', 'rg', 'ag', 'cat', 'less', 'more', 'head', 'tail', 'man', 'which', 'type', 'whatis', 'apropos', 'tldr', 'gh', 'jq', 'sed', 'awk', 'wc', 'sort', 'uniq', 'tr', 'cut', 'diff', 'test', '['])
 const JUDGED = new Set(['rm', 'find', 'git'])
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish'])
+// Commands that run a here-document's body as shell commands
+const SHELL_READERS = new Set([...SHELLS, 'source'])
 
 function nameOf(word: string): string {
   return word.split('/').pop() ?? word

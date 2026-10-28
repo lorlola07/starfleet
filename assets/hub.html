@@ -241,7 +241,7 @@ dialog.viewer iframe { width: 100%; height: 78vh; border: 0; background: #fff; b
 </div>
 
 <script>
-const PAL = { s:'#f2c6a8', d:'#8a4a2a', a:'#f3e3c0', r:'#e0443e', y:'#e8a33a', g:'#b9b6c4', h:'#f6cf6a', k:'#1c1c22', v:'#8c8a96', b:'#3a2a22', t:'#4aa3c7', w:'#efe9df', n:'#6b3e24', p:'#9b6bb5' };
+const PAL = { s:'#f2c6a8', d:'#8a4a2a', a:'#f3e3c0', r:'#e0443e', y:'#e8a33a', g:'#b9b6c4', h:'#f6cf6a', k:'#1c1c22', v:'#8c8a96', b:'#3a2a22', t:'#4aa3c7', w:'#efe9df', n:'#6b3e24', p:'#9b6bb5', f:'#e88fb4', x:'#34343e', u:'#4caf50', q:'#e0a070' };
 const SPRITES = {
   picard: ['..ssss..','.ssssss.','.sksskk.','.ssssss.','..ssss..','.rrrrrr.','rkrrrrkr','rrrrrrrr','.kk..kk.'],
   seven:  ['..hhhh..','.hhhhhh.','hskssksh','hssssssh','..ssss..','.gggggg.','gggggggg','.gggggg.','.gg..gg.'],
@@ -250,6 +250,9 @@ const SPRITES = {
   data:   ['..kkkk..','.kaaaak.','.akaaka.','.aaaaaa.','..aaaa..','.yyyyyy.','ykyyyyky','yyyyyyyy','.kk..kk.'],
   riker:  ['..nnnn..','.nssssn.','.sksskk.','.nnnnnn.','..nnnn..','.rrrrrr.','rkrrrrkr','rrrrrrrr','.kk..kk.'],
   troi:   ['.kkkkkk.','kkssssk.','kskssksk','kssssssk','k.ssss.k','.pppppp.','pppppppp','.pppppp.','.pp..pp.'],
+  guinan: ['.ffffff.','ffffffff','.dddddd.','.dkddkd.','..dddd..','.ffffff.','ffffffff','ffffffff','.ff..ff.'],
+  q:      ['..nnnn..','.nssssn.','.skssks.','.ssssss.','..ssss..','.xhhhhx.','xxxhhxxx','xxxxxxxx','.xx..xx.'],
+  quark:  ['..qqqq..','q.qqqq.q','qqkqqkqq','qqqqqqqq','..qqqq..','.uuuuuu.','uhuuuuhu','uuuuuuuu','.kk..kk.'],
   crusher:['.rrrrrr.','rrssssrr','rskssksr','.ssssss.','..ssss..','.tttttt.','tkttttkt','tttttttt','.kk..kk.'],
 };
 function sprite(key, label) {
@@ -257,18 +260,18 @@ function sprite(key, label) {
   rows.forEach((row, y) => [...row].forEach((c, x) => { if (c !== '.') r += `<rect x="${x}" y="${y}" width="1" height="1" fill="${PAL[c]}"/>`; }));
   return `<svg width="48" height="54" viewBox="0 0 8 9" shape-rendering="crispEdges" role="img" aria-label="${String(label).replace(/[&<>"']/g, ch => `&#${ch.charCodeAt(0)};`)}"><g class="bob">${r}</g></svg>`;
 }
+// The mod's stardate: month and day, then the year's last two digits (1027.26 is 27 Oct 2026)
 function stardate(ms) {
-  const d = new Date(ms), start = Date.UTC(d.getUTCFullYear(), 0, 1);
-  return (1000 * (d.getUTCFullYear() - 1946) + 1000 * (ms - start) / (365.25 * 86400000)).toFixed(1);
+  const d = new Date(ms), p = n => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}${p(d.getDate())}.${p(d.getFullYear() % 100)}`;
 }
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 function btn(cls, text, fn) { const b = el('button', 'btn ' + cls, text); b.type = 'button'; b.onclick = fn; return b; }
 const $ = id => document.getElementById(id);
-// The header clock: stardate in the mod's YYYY.MMDD.HHMM form, then local time, kept live
+// The header clock: stardate, then local time, kept live
 function tickClock() {
-  const d = new Date(), p = n => String(n).padStart(2, '0');
-  const sd = `${d.getFullYear()}.${p(d.getMonth() + 1)}${p(d.getDate())}.${p(d.getHours())}${p(d.getMinutes())}`;
-  $('sd').textContent = `Stardate ${sd} · ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+  const d = new Date();
+  $('sd').textContent = `Stardate ${stardate(d.getTime())} · ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
 }
 tickClock(); setInterval(tickClock, 15000);
 

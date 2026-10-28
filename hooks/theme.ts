@@ -19,10 +19,14 @@ export const LCARS = {
   dim: '#8c8a96',
 } as const
 
+// The one color for every heading: pane titles, section headings and their swatches. Warnings
+// (red alert, assimilation) keep their own colors, since the color is the message
+export const HEAD_COLOR = LCARS.peach
+
 // LCARS panels carry a numeric access code; derive a stable one from a label
 export function lcarsCode(label: string): string {
   const h = hashOf(label)
-  return `${10 + (h % 89)}-${String(1000 + ((h >> 7) % 9000))}`
+  return `${10 + (h % 89)}-${String(1000 + ((h >>> 7) % 9000))}`
 }
 
 // ── Sound ──
@@ -64,7 +68,7 @@ export function lcarsFrameSvg(width: number, title: string, code: string, accent
 // ── Planets: the world under the viewscreen, picked per project to suit its personality ──
 
 type PlanetArt = { defs: string; back?: string; body: string }
-type PlanetSpec = { id: string; name: string; draw: (cx: number, cy: number, r: number, hue: number) => PlanetArt }
+type PlanetSpec = { id: string; name: string; draw: (cx: number, cy: number, r: number, hue: number, color?: string) => PlanetArt }
 
 // Every textured planet is clipped to its disc and shaded toward the night side
 const disc = (cx: number, cy: number, r: number) => `<clipPath id="pc"><circle cx="${cx}" cy="${cy}" r="${r}"/></clipPath>
@@ -77,12 +81,13 @@ const shaded = (cx: number, cy: number, r: number, inner: string) =>
 // Every planet is painted only in the crew sprites' colors (CREW_PALETTE), so the viewscreen
 // and the decks read as one set; gradients and texture between those colors keep them lit
 const C = CREW_PALETTE as Record<'s' | 'd' | 'a' | 'r' | 'y' | 'g' | 'h' | 'k' | 'v' | 'b' | 't' | 'n' | 'p', string>
-// Light and dark pairs an Uncharted world picks from by its project's hue
+// Light and dark pairs an Uncharted world picks from by its project's hue, when its project has no
+// crew member's color to be drawn in
 const UNCHARTED = [[C.s, C.n], [C.t, C.k], [C.p, C.b], [C.y, C.n], [C.r, C.r], [C.g, C.k]] as const
 
 export const PLANETS: PlanetSpec[] = [
-  { id: 'uncharted', name: 'Uncharted', draw: (cx, cy, r, hue) => {
-    const [from, to] = UNCHARTED[Math.floor(hue / 60) % UNCHARTED.length]!
+  { id: 'uncharted', name: 'Uncharted', draw: (cx, cy, r, hue, color) => {
+    const [from, to] = color ? [color, C.k] : UNCHARTED[Math.floor(hue / 60) % UNCHARTED.length]!
     return {
       defs: ball(cx, cy, r, from, to),
       body: shaded(cx, cy, r, `<path d="M${cx - r} ${cy - 8} q${r / 2} -10 ${r} 0 t${r} 0 M${cx - r} ${cy + 14} q${r / 2} -8 ${r} 0 t${r} 0" stroke="${from}" stroke-opacity=".45" stroke-width="5" fill="none"/>
@@ -130,7 +135,7 @@ export const PLANETS: PlanetSpec[] = [
   { id: 'dilithium', name: 'Dilithium', draw: (cx, cy, r) => ({
     defs: ball(cx, cy, r, C.p, C.k),
     body: shaded(cx, cy, r, [[-16, -12], [10, -20], [18, 8], [-6, 16], [-24, 10], [4, -2]].map(([dx, dy], i) =>
-      `<path class="spark" style="animation-delay:${i * 0.4}s" d="M${cx + dx!} ${cy + dy! - 5} l4 5 l-4 5 l-4 -5 z" fill="${C.a}"/>`).join('')),
+      `<path class="spark" style="animation-delay:calc(${i * 0.4}s + var(--g))" d="M${cx + dx!} ${cy + dy! - 5} l4 5 l-4 5 l-4 -5 z" fill="${C.a}"/>`).join('')),
   }) },
   { id: 'disco', name: 'Disco ball', draw: (cx, cy, r) => {
     // Mirror tiles in rows that narrow toward the poles, each a sprite color; some flash in turn
@@ -143,11 +148,11 @@ export const PLANETS: PlanetSpec[] = [
       for (let x = cx - half, i = 0; x < cx + half; x += step, i++) {
         const k = Math.abs(Math.round(x * 7 + y * 13)) % 11
         const color = k < 6 ? (k % 2 ? C.g : C.v) : glints[k % glints.length]!
-        tiles += `<rect${k >= 9 ? ` class="spark" style="animation-delay:${(k + i) % 6 * 0.3}s"` : ''} x="${x.toFixed(1)}" y="${y}" width="${(step - 1).toFixed(1)}" height="${size - 1}" fill="${color}"/>`
+        tiles += `<rect${k >= 9 ? ` class="spark" style="animation-delay:calc(${(k + i) % 6 * 0.3}s + var(--g))"` : ''} x="${x.toFixed(1)}" y="${y}" width="${(step - 1).toFixed(1)}" height="${size - 1}" fill="${color}"/>`
       }
     }
     const beams = [[-1, -1], [1, -0.6], [-0.7, 1], [0.9, 0.9]].map(([dx, dy], i) =>
-      `<line class="glow" style="animation-delay:${i * 0.6}s" x1="${cx}" y1="${cy}" x2="${cx + dx! * 140}" y2="${cy + dy! * 70}" stroke="${glints[i * 2]!}" stroke-opacity=".18" stroke-width="6"/>`).join('')
+      `<line class="glow" style="animation-delay:calc(${i * 0.6}s + var(--g))" x1="${cx}" y1="${cy}" x2="${cx + dx! * 140}" y2="${cy + dy! * 70}" stroke="${glints[i * 2]!}" stroke-opacity=".18" stroke-width="6"/>`).join('')
     return {
       defs: ball(cx, cy, r, C.a, C.v),
       back: beams + `<line x1="${cx}" y1="0" x2="${cx}" y2="${cy - r}" stroke="${C.g}" stroke-width="1.5"/>`,
@@ -160,49 +165,60 @@ export function planetOf(id: string | undefined): PlanetSpec {
   return PLANETS.find(p => p.id === id) ?? PLANETS[0]!
 }
 
-// The viewscreen: the ship in standard orbit around a planet for this project
-export function viewscreenSvg(width: number, project: string, tint: 'none' | 'red' | 'borg', planetId?: string): string {
-  const w = Math.max(200, width)
-  const h = 128
+// The viewscreen: the ship in standard orbit around a planet for this project. Always laid out on
+// one wide canvas (so the planet, orbit and captions never crowd each other) and drawn larger than
+// any pane, so the surface scales the whole picture down to fill its slot edge to edge
+export const FILL_WIDTH = 1600
+
+export function viewscreenSvg(project: string, tint: 'none' | 'red' | 'borg', planetId: string | undefined, now: number, color?: string): string {
+  // As wide as the ship's orbit needs and no wider, so the planet fills more of the frame
+  const w = 400
+  const h = 190
   const hue = hashOf(project) % 360
   const spec = planetOf(planetId)
   const sky = tint === 'red' ? '#1d0707' : tint === 'borg' ? '#06140a' : '#05060f'
   const cx = Math.round(w / 2)
-  const cy = 70
+  const cy = 82
+  // Every redraw loads the picture afresh and restarts its animations, so each animation starts as
+  // far along its loop as the clock says: a redraw then picks up where the last one was
+  const along = (loopMs: number, delayS = 0) => `${Number((delayS - (now % loopMs) / 1000).toFixed(3))}s`
   let stars = ''
   let s = hashOf(project + 'stars')
   for (let i = 0; i < Math.round(w / 7); i++) {
     s = (s * 1103515245 + 12345) % 2147483648
     const x = s % w
     s = (s * 1103515245 + 12345) % 2147483648
-    stars += `<rect class="tw" style="animation-delay:${(s % 30) / 10}s" x="${x}" y="${s % h}" width="${s % 9 === 0 ? 2 : 1}" height="${s % 9 === 0 ? 2 : 1}" fill="#dfe6ff"/>`
+    stars += `<rect class="tw" style="animation-delay:${along(3000, (s % 30) / 10)}" x="${x}" y="${s % h}" width="${s % 9 === 0 ? 2 : 1}" height="${s % 9 === 0 ? 2 : 1}" fill="#dfe6ff"/>`
   }
-  const ship = pixels(SHIP_ROWS, SHIP_PALETTE, 1.5)
-  const art = spec.draw(cx, cy, 38, hue)
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">
+  const ship = pixels(SHIP_ROWS, SHIP_PALETTE, 2)
+  const art = spec.draw(cx, cy, 54, hue, color)
+  // Drawn larger than any pane, so the surface scales it down to fill its slot edge to edge
+  // (height follows the same 'w by h' shape)
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${FILL_WIDTH}" height="${Math.round((FILL_WIDTH * h) / w)}">
 <defs><clipPath id="vs"><rect width="${w}" height="${h}" rx="10"/></clipPath>
 ${art.defs}</defs>
 <style>
 @keyframes tw{0%,100%{opacity:.25}50%{opacity:1}}
-@keyframes orbit{0%{transform:translate(${cx - 120}px,${cy - 6}px) scale(1)}25%{transform:translate(${cx}px,${cy + 22}px) scale(1.25)}50%{transform:translate(${cx + 120}px,${cy - 6}px) scale(1)}50.01%{transform:translate(${cx + 120}px,${cy - 6}px) scale(-1,1)}75%{transform:translate(${cx}px,${cy - 34}px) scale(-.8,.8)}100%{transform:translate(${cx - 120}px,${cy - 6}px) scale(-1,1)}}
+@keyframes orbit{0%{transform:translate(${cx - 150}px,${cy - 6}px) scale(1)}25%{transform:translate(${cx}px,${cy + 30}px) scale(1.25)}50%{transform:translate(${cx + 150}px,${cy - 6}px) scale(1)}50.01%{transform:translate(${cx + 150}px,${cy - 6}px) scale(-1,1)}75%{transform:translate(${cx}px,${cy - 44}px) scale(-.8,.8)}100%{transform:translate(${cx - 150}px,${cy - 6}px) scale(-1,1)}}
 @keyframes behind{0%,50%{opacity:1}55%,95%{opacity:0}100%{opacity:1}}
 .tw{animation:tw 3s ease-in-out infinite}
 @keyframes glow{0%,100%{opacity:.7}50%{opacity:1}}
 @keyframes spark{0%,70%,100%{opacity:.3}80%{opacity:1}}
-.ship{animation:orbit 16s linear infinite}
-.glow{animation:glow 2.4s ease-in-out infinite}
-.spark{animation:spark 2.4s steps(3) infinite}
-@media (prefers-reduced-motion:reduce){.tw,.ship,.glow,.spark{animation:none}.ship{transform:translate(${cx - 120}px,${cy - 6}px)}}
+.ship{animation:orbit 16s linear infinite;animation-delay:${along(16000)}}
+svg{--g:${along(2400)}}
+.glow{animation:glow 2.4s ease-in-out infinite;animation-delay:var(--g)}
+.spark{animation:spark 2.4s steps(3) infinite;animation-delay:var(--g)}
+@media (prefers-reduced-motion:reduce){.tw,.ship,.glow,.spark{animation:none}.ship{transform:translate(${cx - 150}px,${cy - 6}px)}}
 </style>
 <g clip-path="url(#vs)">
 <rect width="${w}" height="${h}" fill="${sky}"/>${stars}
-<ellipse cx="${cx}" cy="${cy}" rx="130" ry="30" fill="none" stroke="${LCARS.blue}" stroke-opacity=".18" stroke-dasharray="3 5"/>
+<ellipse cx="${cx}" cy="${cy}" rx="155" ry="40" fill="none" stroke="${LCARS.blue}" stroke-opacity=".18" stroke-dasharray="3 5"/>
 ${art.back ?? ''}${art.body}
 <g class="ship">${ship}</g>
 </g>
 <rect x=".5" y=".5" width="${w - 1}" height="${h - 1}" rx="10" fill="none" stroke="${tint === 'red' ? LCARS.red : tint === 'borg' ? LCARS.green : LCARS.blue}" stroke-opacity=".7"/>
-<text x="12" y="${h - 10}" font-family="Antonio,'Arial Narrow',sans-serif" font-size="11" letter-spacing="1.5" fill="${LCARS.peach}">STANDARD ORBIT · ${project.toUpperCase().replace(/[<&>]/g, '').slice(0, 28)}</text>
-<text x="${w - 12}" y="${h - 10}" text-anchor="end" font-family="Antonio,'Arial Narrow',sans-serif" font-size="11" letter-spacing="1.5" fill="${LCARS.lilac}">${spec.name.toUpperCase()}</text>
+<text x="16" y="${h - 14}" font-family="Antonio,'Arial Narrow',sans-serif" font-size="13" letter-spacing="1.5" fill="${LCARS.peach}">STANDARD ORBIT · ${project.toUpperCase().replace(/[<&>]/g, '').slice(0, 22)}</text>
+<text x="${w - 16}" y="${h - 14}" text-anchor="end" font-family="Antonio,'Arial Narrow',sans-serif" font-size="13" letter-spacing="1.5" fill="${LCARS.lilac}">${spec.name.toUpperCase()}</text>
 </svg>`
 }
 

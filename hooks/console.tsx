@@ -3,11 +3,12 @@ import type { EngineInterface, On, RenderElement } from 'claude-code'
 
 import { buildBriefing, currentBriefing, dismissBriefing } from './briefing'
 import { TIER_TEXT, coreFlags, coreSvg, ejectCore, tierOf } from './core'
-import { DECKS, DECK_H, crewNow, crewSvg, scanCrew } from './crew'
-import { LOG_FILES, addLogEntry, crewSyncPrompt, filed, readLog, saveMarkdown, sendClosure, syncPrompt } from './log'
+import { openAbout } from './about'
+import { DECKS, DECK_H, crewEditor, crewNow, crewSvg, scanCrew } from './crew'
+import { addLogEntry, sendEntryToHub, crewSyncPrompt, readLog, sendClosure } from './log'
 import { isAiOn, setAi } from './prefs'
 import { redAlertSvg, toggleRedAlert } from './ops'
-import { RANKS, basename, pipsSvg, rankOf, stardate } from './shared'
+import { RANKS, SPRITES, SPRITE_COLORS, basename, pipsSvg, rankOf, stardate } from './shared'
 import { COURSE, courseOf, duration, readVoyage, updateVoyage } from './voyage'
 import { LCARS, PLANETS, chirp, commsBadgeSvg, isMuted, lcarsCode, lcarsFrameSvg, planetOf, viewscreenSvg } from './theme'
 
@@ -24,10 +25,10 @@ const redAlert = atom({ plugin: 'starfleet', key: 'redAlert' } as const, { isOn:
 const assimilation = atom({ plugin: 'starfleet', key: 'assimilation' } as const, 0)
 
 type Section = 'crew' | 'core' | 'record'
-type SectionSpec = { id: Section; label: string; hotkey: string; color: string }
-const CREW: SectionSpec = { id: 'crew', label: 'CREW DECKS', hotkey: '1', color: LCARS.blue }
-const CORE: SectionSpec = { id: 'core', label: 'MAIN ENGINEERING', hotkey: '2', color: LCARS.violet }
-const RECORD: SectionSpec = { id: 'record', label: 'SERVICE RECORD', hotkey: '3', color: LCARS.lilac }
+type SectionSpec = { id: Section; label: string }
+const CREW: SectionSpec = { id: 'crew', label: 'CREW DECKS' }
+const CORE: SectionSpec = { id: 'core', label: 'MAIN ENGINEERING' }
+const RECORD: SectionSpec = { id: 'record', label: 'SERVICE RECORD' }
 
 // Module state: open sections (loaded from $.store), and whether the sound toggle is muted
 let open: Record<Section, boolean> = { crew: true, core: true, record: false }
@@ -37,13 +38,22 @@ let isFocus = false
 let isBadgePaused = false
 let logDraftKey = 0
 let lastLogged: string | undefined
-let logFile: string = 'Note'
 // What the log field holds, so the Record button can file it as well as Enter
 let logDraft = ''
+// The draft the field starts with: set once when a draft is restored, so every redraw passes the
+// same text and the field is never told to change while someone scrolls or types
+let startDraft = ''
 // Block outlines rotate through the brand colors in this order
-const OUTLINES = [LCARS.gold, LCARS.violet, LCARS.lilac, LCARS.red, LCARS.dim] as const
+// The captain's log is always gold and the crew decks always grey; the other blocks rotate
+// through the rest, so a block never borrows those two colors
+const PINNED_OUTLINES: Record<string, string> = { 'b-log': LCARS.gold, 'box-crew': LCARS.dim }
+const OUTLINES = [LCARS.violet, LCARS.lilac, LCARS.red] as const
+
+// The chat id the log draft was loaded for: /clear keeps the process but changes the id
+let draftLoadedFor: string | undefined
 
 async function loadPrefs($: EngineInterface) {
+  await loadChat($)
   if (isOpenLoaded) return
   const saved = (await $.store.get('consoleOpen')) as Partial<Record<Section, boolean>> | undefined
   if (saved) open = { ...open, ...saved }
@@ -51,6 +61,23 @@ async function loadPrefs($: EngineInterface) {
   isFocus = (await $.store.get('focusMode')) === true
   isBadgePaused = (await $.store.get('badgePaused')) === true
   isOpenLoaded = true
+}
+
+// What belongs to one chat: its unrecorded Captain's log draft (kept so a reload doesn't lose it)
+// and its voyage start. Loaded again whenever the chat id changes, so a /clear starts clean
+async function loadChat($: EngineInterface) {
+  const id = await $.session.id()
+  if (draftLoadedFor === id) return
+  const isNewChat = draftLoadedFor !== undefined
+  draftLoadedFor = id
+  const draft = await $.store.get(`logDraft:${id}`)
+  logDraft = typeof draft === 'string' ? draft : ''
+  startDraft = logDraft
+  lastLogged = undefined
+  if (isNewChat) {
+    logDraftKey += 1
+    await updateVoyage($, v => v)
+  }
 }
 
 async function toggle($: EngineInterface, id: Section) {
@@ -85,6 +112,11 @@ async function cyclePlanet($: EngineInterface, project: string, step: 1 | -1) {
 async function pressed($: EngineInterface, run: () => unknown) {
   void chirp($)
   await run()
+}
+
+// Split a list into rows of n, for a grid of buttons
+function chunk<T>(items: T[], n: number): T[][] {
+  return Array.from({ length: Math.ceil(items.length / n) }, (_, i) => items.slice(i * n, i * n + n))
 }
 
 function meter(percent: number, width = 10): string {
@@ -144,7 +176,16 @@ function gist(text: string): string {
   return prose.length > 60 ? prose.slice(0, 59) + '…' : prose || 'Pasted material'
 }
 
+// While the captain is typing in the log field, the once-a-second tick holds off: on the desktop each
+// redraw blinks the field's focus ring. Until this time (clock ms); focus or a keystroke there extends it
+export const logTyping = { until: 0 }
+const LOG_TYPING_HOLD = 15000
+
 export function registerConsole(on: On) {
+  on('ui.focus', { requestId: CONSOLE_PANE }, async ($, e, next) => {
+    logTyping.until = e.element?.startsWith('log-') ? (await $.clock.now()) + LOG_TYPING_HOLD : 0
+    return next(e)
+  })
   on('command.run', { command: 'ai-summaries' }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
     if (arg === 'on' || arg === 'off') await setAi($, arg === 'on')
@@ -182,7 +223,7 @@ export function registerConsole(on: On) {
       return (
         <Box flexDirection="column" rowGap={1} padding="sm" alignItems="center">
           {hasSvg
-            ? <el.Svg source={commsBadgeSvg(isBadgePaused)} alt={isBadgePaused ? 'Starfleet comms badge, paused' : 'Starfleet comms badge, chirping'} width={320} height={236} isInteractive />
+            ? <el.Svg source={commsBadgeSvg(isBadgePaused)} alt={isBadgePaused ? 'Starfleet comms badge, paused' : 'Starfleet comms badge, chirping'} isInteractive />
             : <Text color={LCARS.gold} bold>{'   ▲\n  ◢█◣\n ◥▀ ▀◤'}</Text>}
           <Box flexDirection="row" columnGap={2} flexWrap="wrap" justifyContent="center">
             <Button key="hail" label="🖖 Hail Starfleet" hotkey="f" variant="primary" onPress={() => pressed($, () => setFocus($, false))} />
@@ -196,7 +237,11 @@ export function registerConsole(on: On) {
       )
     }
     const now = await $.clock.now()
+    // The width drawings are laid out at; each Svg carries no size of its own, so the surface
+    // scales it down to fit the pane (height follows) whenever the pane is narrower
     const width = Math.max(240, Math.min(560, ((e.props.bodyColumns ?? 50) - 4) * 8))
+    // A narrow pane gets a 2-column button grid and section headers without their access codes
+    const isNarrow = (e.props.bodyColumns ?? 50) < 60
     const a = await read($, activity)
     const alert = await read($, redAlert)
     const percent = await read($, assimilation)
@@ -206,28 +251,44 @@ export function registerConsole(on: On) {
     const seconds = a.turnStartedAt === null ? null : Math.floor((now - a.turnStartedAt) / 1000)
     const condition = alert.isOn
       ? { label: 'RED', color: LCARS.red }
-      : tier >= 2 ? { label: 'BORG', color: LCARS.green }
+      // Borg gets orange, a step up from yellow, so a full memory never reads as all-clear green
+      : tier >= 2 ? { label: 'BORG', color: LCARS.orange }
       : tier === 1 ? { label: 'YELLOW', color: LCARS.gold }
       : { label: 'GREEN', color: LCARS.green }
     const voyage = await readVoyage($)
-    const course = courseOf(voyage)
+    const course = courseOf(voyage, now)
     const warpMs = voyage.warpMs + (seconds ?? 0) * 1000
 
-    // Every block gets an outline; the colors rotate gold, violet, lilac, red, grey
-    let outlineAt = 0
-    const nextOutline = () => OUTLINES[outlineAt++ % OUTLINES.length]!
+    // Every block gets an outline: the log and crew keep their pinned colors, the rest rotate violet,
+    // lilac, red down the console. Each block's color is settled up front (blocks that aren't shown
+    // are skipped), so its heading swatch can match its outline
+    const order = (await $.store.get(await lastOrderKey($))) as LastOrder | undefined
+    const b = await currentBriefing($)
+    const shown = ['b-view', 'b-status', 'b-log', order && 'b-order', !b.isDismissed && 'b-brief', 'box-crew', 'box-core', 'box-record'].filter(Boolean) as string[]
+    const rotating = shown.filter(key => !PINNED_OUTLINES[key])
+    const outlineOf = (key: string) => PINNED_OUTLINES[key] ?? OUTLINES[Math.max(0, rotating.indexOf(key)) % OUTLINES.length]!
     const block = (key: string, children: RenderElement | (RenderElement | false | null | undefined)[]) => (
-      <Box key={key} flexDirection="column" rowGap={1} borderStyle="round" borderColor={nextOutline()} paddingX={1}>{children}</Box>
+      <Box key={key} flexDirection="column" rowGap={1} borderStyle="round" borderColor={outlineOf(key)} paddingX={1}>{children}</Box>
+    )
+
+    // Every block's heading looks the same: a swatch in its block's outline color, the name in
+    // bold, a dim summary after it
+    const head = (label: string, summary: string | undefined, block: string) => (
+      <Box flexDirection="row" columnGap={1} alignItems="center" flexWrap="wrap">
+        <Text backgroundColor={outlineOf(block)} color={LCARS.ink}>{'  '}</Text>
+        <Text bold>{label}</Text>
+        {summary && <Text dimColor>{summary}</Text>}
+      </Box>
     )
 
     // An LCARS section: a colored pill, the header button, its access code and a summary
     const section = (s: SectionSpec, summary: string, body: () => RenderElement) => (
-      <Box key={'box-' + s.id} flexDirection="column" rowGap={open[s.id] ? 1 : 0} borderStyle="round" borderColor={nextOutline()} paddingX={1}>
-        <Box flexDirection="row" columnGap={1} alignItems="center">
-          <Text backgroundColor={s.color} color={LCARS.ink}>{'  '}</Text>
-          <Button key={'sec-' + s.id} label={`${open[s.id] ? '▾' : '▸'} ${s.label}`} hotkey={s.hotkey} plain onPress={() => toggle($, s.id)} />
-          <Text color={s.color} dimColor>{lcarsCode(s.label)}</Text>
-          <Text dimColor>{summary}</Text>
+      <Box key={'box-' + s.id} flexDirection="column" rowGap={open[s.id] ? 1 : 0} borderStyle="round" borderColor={outlineOf('box-' + s.id)} paddingX={1}>
+        {/* The same heading as every block (swatch, bold name, details after it), with the open and
+            close arrow at the far right */}
+        <Box flexDirection="row" columnGap={1} alignItems="center" justifyContent="space-between">
+          {head(s.label, [isNarrow ? '' : lcarsCode(s.label), summary].filter(Boolean).join(' · '), 'box-' + s.id)}
+          <Button key={'sec-' + s.id} label={open[s.id] ? '▾' : '▸'} plain dimColor onPress={() => toggle($, s.id)} />
         </Box>
         {open[s.id] && body()}
       </Box>
@@ -235,109 +296,126 @@ export function registerConsole(on: On) {
 
     // ── Frame and viewscreen ──
     const frame = hasSvg
-      ? <el.Svg source={lcarsFrameSvg(width, 'USS CLAUDE', lcarsCode(project), alert.isOn ? LCARS.red : LCARS.orange)} alt="USS Claude LCARS console" width={width} height={58} />
+      ? <el.Svg source={lcarsFrameSvg(width, 'USS CLAUDE', lcarsCode(project), alert.isOn ? LCARS.red : LCARS.orange)} alt="USS Claude LCARS console" />
       : <Text backgroundColor={alert.isOn ? LCARS.red : LCARS.orange} color={LCARS.ink} bold> USS CLAUDE · LCARS {lcarsCode(project)} </Text>
     const tint = alert.isOn ? 'red' : tier >= 2 ? 'borg' : 'none'
-    // Arrows either side of the viewscreen swap the planet; p steps forward
+    // Arrows either side of the viewscreen swap the planet
     const planet = planetOf(await planetFor($, project))
-    const screenWidth = width - 56
+    // The default planet takes this project's crew color, the same as its chats' tag
+    const here = (await crewNow($)).find(c => c.isCurrent)
+    const crewColor = here ? SPRITE_COLORS[here.sprite] : undefined
     const viewscreen = (
       <Box flexDirection="row" columnGap={1} alignItems="center">
         <Button key="planet-prev" label="◀" plain dimColor onPress={() => cyclePlanet($, project, -1)} />
-        {hasSvg
-          ? <el.Svg source={viewscreenSvg(screenWidth, project, tint, planet.id)} alt={`Viewscreen: the ship in standard orbit around ${project}, a ${planet.name} planet`} width={screenWidth} height={128} isInteractive />
-          : <Text color={LCARS.blue}>{`   ·   ✦     (◯) ${planet.name}   >=<    ·   ✦  `}</Text>}
-        <Button key="planet-next" label="▶" hotkey="p" plain dimColor onPress={() => cyclePlanet($, project, 1)} />
+        {/* The screen takes what the arrows leave and shrinks with the pane; the arrows never get pushed
+            out. A plain image (not interactive) fills that space; its CSS orbit animation still runs */}
+        <Box flexGrow={1} flexShrink={1} minWidth={0}>
+          {hasSvg
+            ? <el.Svg source={viewscreenSvg(project, tint, planet.id, now, crewColor)} alt={`Viewscreen: the ship in standard orbit around ${project}, a ${planet.name} planet`} />
+            : <Text color={LCARS.blue} wrap="truncate">{`   ·   ✦     (◯) ${planet.name}   >=<    ·   ✦  `}</Text>}
+        </Box>
+        <Button key="planet-next" label="▶" plain dimColor onPress={() => cyclePlanet($, project, 1)} />
       </Box>
     )
 
     // ── Status and controls ──
+    const adminButtons = [
+      <Button key="captain" label={captain ? '🖖 Captain mode' : 'Captain mode'} hotkey="c" plain onPress={() => pressed($, () => update($, isCaptainMode, v => !v))} />,
+      <Button key="focus" label="Focus" hotkey="f" plain onPress={() => pressed($, () => setFocus($, true))} />,
+      <Button key="alert" label={alert.isOn ? 'Belay red alert' : 'Red alert'} hotkey="r" plain onPress={() => toggleRedAlert($)} />,
+      <Button key="sound" label={muted ? 'Unmute' : 'Mute'} hotkey="o" plain dimColor={muted} onPress={async () => {
+        muted = !muted
+        await $.store.set('muted', muted)
+        if (!muted) void chirp($)
+        $.ui.invalidate('ui.render')
+      }} />,
+      <Button key="closure" label="Close mission" hotkey="z" plain onPress={() => pressed($, () => sendClosure($))} />,
+      <Button key="about" label="About" hotkey="a" plain onPress={() => pressed($, () => openAbout($))} />,
+    ]
     const status = (
       <Box flexDirection="column" rowGap={1}>
-        {alert.isOn && hasSvg && <el.Svg source={redAlertSvg(alert.reason, width)} alt={`Red alert: ${alert.reason}`} width={width} height={34} isInteractive />}
-        <Box flexDirection="row" columnGap={1} flexWrap="wrap" alignItems="center">
+        {alert.isOn && hasSvg && <el.Svg source={redAlertSvg(alert.reason, width)} alt={`Red alert: ${alert.reason}`} height={34} isInteractive />}
+        {/* Condition sits on its own line under the stardate, so the header never wraps around it */}
+        <Box flexDirection="column" alignItems="flex-start">
           <Text color={LCARS.peach} size="title" weight="bold" tabular>STARDATE {stardate(now)}</Text>
-          <Text backgroundColor={condition.color} color={LCARS.ink} size="caption" bold> COND {condition.label} </Text>
+          <Text backgroundColor={condition.color} color={LCARS.ink} size="caption" bold> CONDITION {condition.label} </Text>
         </Box>
         <Box flexDirection="column">
-          <Text>
-            <Text color={LCARS.violet}>{'COURSE'.padEnd(10)}</Text>
+          {/* One line, cut if long: the stage name grows as the work moves on, mid-turn included */}
+          <Text wrap="truncate">
+            <Text color={LCARS.violet} bold>{'COURSE'.padEnd(10)}</Text>
             <Text color={course.isBreach ? LCARS.red : LCARS.green}>{meter((course.stage / (COURSE.length - 1)) * 100, COURSE.length - 1)} </Text>
             <Text color={course.isBreach ? LCARS.red : course.stage ? LCARS.gold : LCARS.dim} bold>{course.label}</Text>
           </Text>
-          <Text dimColor>{' '.repeat(10)}{course.detail}</Text>
-          <Text>
-            <Text color={LCARS.violet}>{'TIME LOG'.padEnd(10)}</Text>
-            <Text tabular>on duty {duration(now - voyage.startedAt)} · at warp {duration(warpMs)} · {voyage.orders + a.turnCalls} orders</Text>
-            {seconds !== null && <Text color={LCARS.gold} tabular> · this mission {duration(seconds * 1000)}</Text>}
+          {/* One line, cut if long: it grows while Claude works and must not change the block's height */}
+          <Text dimColor wrap="truncate">{' '.repeat(10)}{course.detail}</Text>
+          {/* These tick every second while Claude works: one line each, cut if long, so the block
+              never changes height mid-turn */}
+          <Text wrap="truncate">
+            <Text color={LCARS.violet} bold>{'TIME LOG'.padEnd(10)}</Text>
+            <Text tabular>on duty {duration(now - voyage.startedAt)} · at warp {duration(warpMs)}</Text>
+          </Text>
+          <Text wrap="truncate">
+            <Text color={LCARS.violet} bold>{'ORDERS'.padEnd(10)}</Text>
+            <Text tabular>{voyage.orders + a.turnCalls}</Text>
           </Text>
         </Box>
-        {/* Admin controls on an invisible 3-column grid, so they line up */}
+        {/* Admin controls on an invisible grid, so they line up: 3 columns, 2 on a narrow pane */}
         <Box flexDirection="column" rowGap={0}>
-          <Box flexDirection="row">
-            <Box width="34%"><Button key="captain" label={captain ? '🖖 Captain mode' : 'Captain mode'} hotkey="c" plain onPress={() => pressed($, () => update($, isCaptainMode, v => !v))} /></Box>
-            <Box width="33%"><Button key="focus" label="Focus" hotkey="f" plain onPress={() => pressed($, () => setFocus($, true))} /></Box>
-            <Box width="33%"><Button key="alert" label={alert.isOn ? 'Belay red alert' : 'Red alert'} hotkey="r" plain onPress={() => toggleRedAlert($)} /></Box>
-          </Box>
-          <Box flexDirection="row">
-            <Box width="34%"><Button key="sound" label={muted ? 'Unmute' : 'Mute'} hotkey="o" plain dimColor={muted} onPress={async () => {
-              muted = !muted
-              await $.store.set('muted', muted)
-              if (!muted) void chirp($)
-              $.ui.invalidate('ui.render')
-            }} /></Box>
-            <Box width="33%"><Button key="closure" label="Close mission" hotkey="z" plain onPress={() => pressed($, () => sendClosure($))} /></Box>
-            <Box width="33%" />
-          </Box>
+          {chunk(adminButtons, isNarrow ? 2 : 3).map((row, r) => (
+            <Box key={'admin-' + r} flexDirection="row">
+              {row.map((b, c) => <Box key={`cell-${r}-${c}`} width={isNarrow ? '50%' : '33%'}>{b}</Box>)}
+            </Box>
+          ))}
         </Box>
       </Box>
     )
 
     // ── Last order: a toast-style card with the captain's latest prompt ──
-    const order = (await $.store.get(await lastOrderKey($))) as LastOrder | undefined
     const lastOrder = order && (
       <Box flexDirection="column">
-        <Text>
-          <Text color={LCARS.gold} bold>💬 LAST ORDER </Text>
-          <Text dimColor>{duration(now - order.at)} ago</Text>
-        </Text>
-        <Text>{order.summary ?? gist(order.text)}</Text>
-        {!order.summary && <Text dimColor italic>Summarizing…</Text>}
-        <Button key="reorder" label="Reissue" hotkey="u" plain dimColor onPress={() => pressed($, () => $.prompt.fill({ text: order.text, mode: 'replace' }))} />
+        {head('LAST ORDER', `${duration(now - order.at)} ago`, 'b-order')}
+        {/* One line, cut if long: the short title arrives mid-turn and must not change the height */}
+        <Text wrap="truncate">{order.summary ?? gist(order.text)}</Text>
       </Box>
     )
 
     // ── Mission briefing ──
-    const b = currentBriefing()
     const briefing = b.isDismissed ? null : b.status === 'none' ? (
-      <Button key="brief" label="Mission briefing" hotkey="b" plain onPress={() => pressed($, () => buildBriefing($))} />
+      <Box flexDirection="column" rowGap={1}>
+        {head('MISSION BRIEFING', 'where this project left off', 'b-brief')}
+        <Button key="brief" label="Get briefing" hotkey="b" plain onPress={() => pressed($, () => buildBriefing($))} />
+      </Box>
     ) : (
       <Box flexDirection="column">
-        <Box flexDirection="row" columnGap={1}>
-          <Text backgroundColor={LCARS.peach} color={LCARS.ink} bold> MISSION BRIEFING </Text>
-          <Text dimColor>{b.status === 'loading' ? 'Decoding transmission…' : `from ${b.source}`}</Text>
-        </Box>
+        {head('MISSION BRIEFING', b.status === 'loading' ? 'Decoding transmission…' : `from ${b.source}`, 'b-brief')}
         {b.lines.map(line => {
           const [head, ...rest] = line.split(':')
           return rest.length && /^[A-Z ]+$/.test(head!)
-            ? <Text><Text color={LCARS.peach} bold>{head}:</Text>{rest.join(':')}</Text>
+            ? <Text><Text color={LCARS.violet}>{head}:</Text>{rest.join(':')}</Text>
             : <Text>{line}</Text>
         })}
-        {b.status === 'ready' && <Button key="ack" label="Acknowledged" hotkey="k" plain dimColor onPress={() => pressed($, () => { dismissBriefing(); $.ui.invalidate('ui.render') })} />}
+        {b.status === 'ready' && <Button key="ack" label="Acknowledged" hotkey="k" plain dimColor onPress={() => pressed($, async () => { await dismissBriefing($); $.ui.invalidate('ui.render') })} />}
       </Box>
     )
 
     // ── Crew decks ──
     const crew = await crewNow($)
+    // Built only while the section is open: the console redraws every second during a turn
+    const crewEdit = open.crew ? await crewEditor($, el, crew, 'console') : null
     const crewBody = () => (
       <Box flexDirection="column" rowGap={1}>
         {crew.length === 0 && <Text dimColor>Scanning for crew…</Text>}
         {crew.length > 0 && hasSvg && (
-          <el.Svg source={crewSvg(crew, width - 24)} alt={crew.map(c => `${c.name} (${c.project}) on ${c.deck}`).join(', ')} width={width - 24} height={DECKS.length * DECK_H + 8} isInteractive />
+          // A plain image (not interactive) takes the full width of its box; its CSS walk and bob
+          // animations still run inside it
+          <Box width="100%">
+            <el.Svg source={crewSvg(crew, now)} alt={crew.map(c => `${c.name} (${c.project}) on ${c.deck}`).join(', ')} />
+          </Box>
         )}
         {!hasSvg && crew.map(c => (
           <Text>
-            <Text color={LCARS.peach} bold>{c.name.padEnd(8)}</Text> {c.project.padEnd(16)} <Text color={LCARS.lilac}>{c.deck.toUpperCase()}</Text>
+            {SPRITES[c.sprite]?.emoji ?? '  '} <Text color={LCARS.peach} bold>{c.name.padEnd(8)}</Text> {c.project.padEnd(16)} <Text color={LCARS.lilac}>{c.deck.toUpperCase()}</Text>
           </Text>
         ))}
         <Button key="rescan" label="Rescan + sync crew" hotkey="n" plain onPress={() => pressed($, async () => {
@@ -346,6 +424,7 @@ export function registerConsole(on: On) {
           void $.prompt.submit({ text: await crewSyncPrompt($) }).catch(() => {})
           $.ui.toast('📡 Crew rescanned. Sending the roster to Starfleet Command…')
         })} />
+        {crewEdit}
       </Box>
     )
 
@@ -353,52 +432,49 @@ export function registerConsole(on: On) {
     const log = await readLog($)
     const recordLog = async (value: string) => {
       if (!value.trim()) return
-      const entry = await addLogEntry($, filed(logFile, value.trim()))
+      const entry = await addLogEntry($, value.trim())
+      await sendEntryToHub($, entry)
       void chirp($)
       lastLogged = `Logged · ${entry.stardate}`
       logDraft = ''
+      startDraft = ''
+      void $.session.id().then(id => $.store.delete(`logDraft:${id}`)).catch(() => {})
       logDraftKey += 1
+      logTyping.until = 0
       $.ui.invalidate('ui.render')
     }
+    const logField = 'Input' in el && (
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>
+        <el.Input key={'log-' + logDraftKey} value={startDraft} submitLabel="↵" onInput={value => {
+          logDraft = value
+          void $.clock.now().then(now => { logTyping.until = now + LOG_TYPING_HOLD }).catch(() => {})
+          void $.session.id().then(id => $.store.set(`logDraft:${id}`, value)).catch(() => {})
+        }} onSubmit={recordLog} />
+      </Box>
+    )
+    const recordButton = (
+      <Box backgroundColor={LCARS.lilac} paddingX={1} flexShrink={0}>
+        <Button key="record" label="Record" plain onPress={() => pressed($, () => recordLog(logDraft))} />
+      </Box>
+    )
     const logButton = (
       <Box flexDirection="column" rowGap={1}>
+        {head('CAPTAIN’S LOG', lastLogged ?? (log.length ? `${log.length} entries` : ''), 'b-log')}
+        {/* Entries carry no type. Record sits right of the field: the field takes what Record leaves
+            and shrinks with the pane, Record never shrinks or wraps */}
         <Box flexDirection="row" columnGap={1} alignItems="center">
-          <Text color={LCARS.peach} bold>📓 CAPTAIN’S LOG</Text>
-          <Text dimColor>{lastLogged ?? (log.length ? `${log.length} entries` : '')}</Text>
-        </Box>
-        {/* Kind, entry and Record sit on one row so they read as one control */}
-        <Box flexDirection="row" columnGap={1} alignItems="center">
-          {'Select' in el && (
-            <el.Select key="log-file" label="" value={logFile} options={LOG_FILES.map(f => ({ value: f }))} onSelect={value => {
-              logFile = value
-              $.ui.invalidate('ui.render')
-            }} />
-          )}
-          {'Input' in el && (
-            <Box flexGrow={1}>
-              <el.Input key={'log-' + logDraftKey} value="" submitLabel="record" onInput={value => { logDraft = value }} onSubmit={recordLog} />
-            </Box>
-          )}
-          <Box backgroundColor={LCARS.lilac} paddingX={1}>
-            <Button key="record" label="⏺ Record" plain onPress={() => pressed($, () => recordLog(logDraft))} />
-          </Box>
-        </Box>
-        <Box flexDirection="row">
-          <Box width="34%"><Button key="sync" label="📡 Sync" hotkey="s" plain onPress={() => pressed($, () => {
-            void syncPrompt($).then(text => $.prompt.submit({ text })).catch(() => {})
-            $.ui.toast('📡 Transmitting records to Starfleet Command…')
-          })} /></Box>
-          <Box width="33%"><Button key="md" label="💾 Save" hotkey="d" plain onPress={() => pressed($, () => saveMarkdown($))} /></Box>
-          <Box width="33%"><Button key="ask" label="💬 Ask" hotkey="a" plain onPress={() => pressed($, () => $.prompt.fill({ text: 'Using my captain’s log, ', mode: 'replace' }))} /></Box>
+          {logField}
+          {recordButton}
         </Box>
       </Box>
     )
 
     // ── Main engineering: the warp core, laid out as labeled readouts ──
     const flags = coreFlags(now)
-    const window = flags.tokens && percent ? Math.round(flags.tokens / (percent / 100)) : 0
+    // Claude Code reports the window; working it out from a rounded percent is only the fallback
+    const window = flags.window || (flags.tokens && percent ? Math.round(flags.tokens / (percent / 100)) : 0)
     const readout = (label: string, value: RenderElement | string, color?: string) => (
-      <Text><Text color={LCARS.violet}>{label.padEnd(12)}</Text><Text color={color}>{value}</Text></Text>
+      <Text wrap="truncate"><Text color={LCARS.violet} bold>{label.padEnd(12)}</Text><Text color={color}>{value}</Text></Text>
     )
     const coreBody = () => (
       <Box flexDirection="row" columnGap={2}>
@@ -449,10 +525,12 @@ export function registerConsole(on: On) {
         {frame}
         {block('b-view', viewscreen)}
         {block('b-status', status)}
+        {/* The captain's log sits right under the stardate, then the last order and the briefing; the
+            numbered sections (1 to 3) come together below */}
+        {block('b-log', logButton)}
         {lastOrder && block('b-order', lastOrder)}
         {briefing && block('b-brief', briefing)}
         {section(CREW, crew.length ? `${crew.length} aboard` : 'Not scanned', crewBody)}
-        {block('b-log', logButton)}
         {section(CORE, tier ? TIER_TEXT[tier]! : `Core load ${percent}%`, coreBody)}
         {section(RECORD, `${rank.name} · ${r.turns} missions`, recordBody)}
       </Box>

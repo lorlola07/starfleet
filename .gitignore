@@ -1,0 +1,6 @@
+# Local dev notes and tooling, not part of the mod
+CLAUDE.md
+.ux-profile.md
+# Types the engine writes on load
+.claude-plugin/types/
+.DS_Store

@@ -2,8 +2,8 @@ import { atom, read } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
 import type { CrewMember, Deck } from '../types'
-import { CREW_PALETTE, SPRITES, SPRITE_ORDER, basename, deckOfTool, errText, pixels, serial } from './shared'
-import { LCARS } from './theme'
+import { CREW_PALETTE, SPRITES, SPRITE_ORDER, basename, errText, pixels, projectOf, serial, taggedTitle, untaggedTitle } from './shared'
+import { FILL_WIDTH, HEAD_COLOR, LCARS } from './theme'
 
 // Your code projects as an 8-bit crew. Each stands on the deck that matches its state, and
 // this session's project follows Claude to whichever deck is doing the work right now.
@@ -18,8 +18,8 @@ export const DECKS: { id: Deck; label: string; color: string }[] = [
   { id: 'sickbay', label: 'DECK 9 · SICKBAY', color: '#ff5555' },
   { id: 'quarters', label: 'DECK 8 · CREW QUARTERS', color: '#8c8a96' },
 ]
-export const DECK_H = 46
-const SLOT_W = 58
+export const DECK_H = 62
+const SLOT_W = 66
 
 // Module state: the roster, and where each sprite was last drawn (so it walks from there)
 let roster: Omit<CrewMember, 'deck' | 'isCurrent'>[] = []
@@ -27,25 +27,57 @@ let baseDecks: Record<string, Deck> = {}
 let lastScan = 0
 // Why the archive check could not run on the last scan, shown in the pane; undefined when it ran
 let archiveProblem: string | undefined
+// The app's sessions as the last archive check read them, for tagging each chat with its crew emoji
+type AppSession = { sessionId?: string; title?: string; cwd?: string; isArchived?: boolean }
+let appSessions: AppSession[] = []
+// Chats whose retitle the app refused (the captain declined it): asked once per load, not every scan
+const tagRefused = new Set<string>()
 // Where each sprite stands now. A sprite moves only when its next deck is known; otherwise it stays
 const placed: Record<string, Deck> = {}
 // When the latest turn began, so a scan from before it is not trusted for this session's project
 let latestTurnStart = 0
 const walkFrom: Record<string, { x: number; y: number }> = {}
 const walkTo: Record<string, { x: number; y: number }> = {}
+// When each walk began: past WALK_MS the picture draws the sprite standing still
+const walkAt: Record<string, number> = {}
+const WALK_MS = 1800
 
 // ~/.claude/projects names a project's path with every / and . turned into -; rebuild it.
-// A dash may also be a real one (my-space), so try each split and back up on a dead end
+// A dash may also be a real one (my-space), so try each split and back up on a dead end.
+// Spaces, underscores and other marks became dashes too ("Side Work"): when the dashed name
+// is not there, look in the folder for an entry that encodes to it
+const encodeName = (name: string) => name.replace(/[^a-zA-Z0-9]/g, '-')
+// Folders already decoded, by their ~/.claude/projects name: one check that the folder is still
+// there replaces the walk on later scans
+const decoded = new Map<string, string>()
 async function decodeProjectDir($: EngineInterface, name: string): Promise<string | undefined> {
+  const known = decoded.get(name)
+  if (known && (await $.fs.exists(known))) return known
+  decoded.delete(name)
+  const found = await walkProjectDir($, name)
+  if (found) decoded.set(name, found)
+  return found
+}
+async function walkProjectDir($: EngineInterface, name: string): Promise<string | undefined> {
   const parts = name.replace(/^-/, '').split('-')
+  const listings = new Map<string, Promise<string[]>>()
+  const entries = (dir: string) => {
+    if (!listings.has(dir)) listings.set(dir, $.fs.list(dir || '/').then(xs => xs.filter(x => x.kind === 'dir').map(x => x.name), () => []))
+    return listings.get(dir)!
+  }
   async function walk(path: string, i: number): Promise<string | undefined> {
     if (i >= parts.length) return path
     // Two dashes in a row were "/." : a dot folder such as .claude
     const isDot = parts[i] === ''
     const start = isDot ? i + 1 : i
     for (let j = start; j < parts.length; j++) {
-      const candidate = `${path}/${isDot ? '.' : ''}${parts.slice(start, j + 1).join('-')}`
-      if (!(await $.fs.exists(candidate))) continue
+      const dashed = `${isDot ? '.' : ''}${parts.slice(start, j + 1).join('-')}`
+      let candidate = `${path}/${dashed}`
+      if (!(await $.fs.exists(candidate))) {
+        const real = (await entries(path)).find(n => encodeName(n) === encodeName(dashed))
+        if (!real) continue
+        candidate = `${path}/${real}`
+      }
       const found = await walk(candidate, j + 1)
       if (found) return found
     }
@@ -129,14 +161,196 @@ async function cloudMember($: EngineInterface, repo: string, now: number) {
   return { member: { path: CLOUD_PREFIX + repo, project: repo.split('/').pop() ?? repo, sprite: '', name: 'Crew', status }, deck }
 }
 
+// ── Removing and adding crew: every folder with chats here is crew until removed. A removed
+// folder (store key crewHidden) leaves the crew decks, the hub roster and the sidebar emoji and
+// frees its sprite; every other part of the mod still runs in its chats. An added folder (store
+// key crewAdded) is always aboard, even past the newest 10 (one per sprite) or with no chats yet ──
+
+const CREW_TOOL = 'mcp__starfleet__starfleet_crew'
+const editLock = serial()
+// Folders with chats here that did not fit on the decks, offered by Add
+let spare: string[] = []
+// Which list the crew editor shows under its buttons, and in which pane, if any
+type Picker = { where: string; which: 'add' | 'remove' }
+let crewPicker: Picker | undefined
+
+async function pathList($: EngineInterface, key: 'crewHidden' | 'crewAdded'): Promise<string[]> {
+  const saved = await $.store.get(key)
+  return Array.isArray(saved) ? (saved as string[]) : []
+}
+export const hiddenProjects = ($: EngineInterface) => pathList($, 'crewHidden')
+
+// The most crew there is room for: one sprite each, less the picked cloud repos
+async function crewCap($: EngineInterface) {
+  return SPRITE_ORDER.length - (await cloudPicks($)).length
+}
+
+// Removing hides a folder and unpins it. Adding first undoes a removal; only a folder that still
+// isn't aboard then (no chats here, or past the newest 10) is pinned, while there is room.
+// Answers why it couldn't, or undefined when done
+async function setAboard($: EngineInterface, path: string, isAboard: boolean): Promise<string | undefined> {
+  const wasHidden = (await hiddenProjects($)).includes(path)
+  if (!isAboard || wasHidden) {
+    await editLock(async () => {
+      const hidden = (await pathList($, 'crewHidden')).filter(p => p !== path)
+      await $.store.set('crewHidden', isAboard ? hidden : [...hidden, path])
+      if (!isAboard) await $.store.set('crewAdded', (await pathList($, 'crewAdded')).filter(p => p !== path))
+    })
+    await scanCrew($)
+  }
+  if (isAboard && !roster.some(c => c.path === path)) {
+    const cap = await crewCap($)
+    const isFull = await editLock(async () => {
+      const added = await pathList($, 'crewAdded')
+      if (added.includes(path)) return false
+      if (added.length >= cap) return true
+      await $.store.set('crewAdded', [...added, path])
+      return false
+    })
+    if (isFull) return `The crew is full: ${cap} projects are added by hand. Remove one first.`
+    await scanCrew($)
+  }
+  $.ui.invalidate('ui.render')
+  return undefined
+}
+
+// The question popup; a dismissed one answers nothing
+async function ask($: EngineInterface, question: string, options: string[]): Promise<string | undefined> {
+  try {
+    return await $.ui.ask(question, { header: 'Crew', options })
+  } catch {
+    return undefined
+  }
+}
+
+// Any answer closes the list the name was picked from
+function closePicker($: EngineInterface) {
+  crewPicker = undefined
+  $.ui.invalidate('ui.render')
+}
+
+export async function confirmRemove($: EngineInterface, path: string) {
+  const name = basename(path)
+  // Keep comes first, so the safe answer is the default
+  const answer = await ask($, `Remove ${name} from the crew?`, ['Keep', `Remove ${name}`])
+  closePicker($)
+  if (answer !== `Remove ${name}`) return
+  await setAboard($, path, false)
+  $.ui.toast(`${name} left the crew. The rest of the mod still runs in its chats.`)
+}
+
+export async function confirmAdd($: EngineInterface, path: string) {
+  const name = basename(path)
+  const answer = await ask($, `Add ${name} to the crew?`, [`Add ${name}`, 'Cancel'])
+  closePicker($)
+  if (answer !== `Add ${name}`) return
+  $.ui.toast((await setAboard($, path, true)) ?? `${name} joined the crew.`)
+}
+
+// A folder with no chats here yet: typed under Other as a full path (~ for home)
+async function addOtherFolder($: EngineInterface) {
+  const answer = await ask($, 'Which folder should join the crew? Type its full path under Other.', ['Cancel', 'Pick from the list'])
+  if (answer !== 'Pick from the list') closePicker($)
+  if (!answer || answer === 'Cancel' || answer === 'Pick from the list') return
+  const home = (await $.env.get('HOME')) ?? ''
+  const path = answer.trim().replace(/^~(?=\/|$)/, home).replace(/\/+$/, '')
+  if (!path.startsWith('/') || !(await $.fs.exists(path))) {
+    $.ui.toast(`No folder at ${answer.trim()}. Give its full path, like ~/Projects/app.`)
+    return
+  }
+  $.ui.toast((await setAboard($, path, true)) ?? `${basename(path)} joined the crew.`)
+}
+
+// Remove and Add buttons, and the list the pressed one opens: each project's name is a button
+// that asks before it changes anything. Drawn in the console and in /crew
+export async function crewEditor($: EngineInterface, el: ReturnType<EngineInterface['ui']['resolve']>, crew: CrewMember[], where: 'console' | 'crew') {
+  const { Box, Text, Button } = el
+  const cwd = projectOf(await $.session.cwd())!
+  const local = crew.filter(c => !c.path.startsWith(CLOUD_PREFIX))
+  const aboard = new Set(crew.map(c => c.path))
+  const offer = [...new Set([...(aboard.has(cwd) ? [] : [cwd]), ...(await hiddenProjects($)), ...spare])].filter(p => !aboard.has(p))
+  const shown = crewPicker?.where === where ? crewPicker.which : undefined
+  const toggle = (which: 'add' | 'remove') => () => {
+    crewPicker = shown === which ? undefined : { where, which }
+    $.ui.invalidate('ui.render')
+  }
+  return (
+    <Box flexDirection="column" rowGap={1}>
+      <Box flexDirection="row" columnGap={2} flexWrap="wrap">
+        <Button key="crew-add" label={shown === 'add' ? '▾ Add project' : '+ Add project'} plain onPress={toggle('add')} />
+        <Button key="crew-remove" label={shown === 'remove' ? '▾ Remove project' : '− Remove project'} plain onPress={toggle('remove')} />
+      </Box>
+      {shown === 'remove' && (
+        <Box flexDirection="column">
+          <Text dimColor>Pick the project to remove. You'll be asked to confirm.</Text>
+          <Box flexDirection="row" columnGap={2} flexWrap="wrap">
+            {local.length === 0 && <Text dimColor>No projects aboard yet. Press + Add project to bring one onto the decks.</Text>}
+            {local.map(c => <Button key={`crew-pick-${c.path}`} label={`${SPRITES[c.sprite]?.emoji ?? ''} ${c.project}`} plain onPress={() => confirmRemove($, c.path)} />)}
+          </Box>
+        </Box>
+      )}
+      {shown === 'add' && (
+        <Box flexDirection="column">
+          <Text dimColor>Pick the project to add. You'll be asked to confirm.</Text>
+          <Box flexDirection="row" columnGap={2} flexWrap="wrap">
+            {offer.map(p => <Button key={`crew-pick-${p}`} label={p === cwd ? `${basename(p)} (this chat)` : basename(p)} plain onPress={() => confirmAdd($, p)} />)}
+            <Button key="crew-other" label="Add another folder…" plain onPress={() => addOtherFolder($)} />
+          </Box>
+        </Box>
+      )}
+    </Box>
+  )
+}
+
+// For the crew tool: find the folder by its name on the decks (or full path) and move it
+async function setProjectByName($: EngineInterface, name: string, isAboard: boolean): Promise<string> {
+  const hidden = await hiddenProjects($)
+  const want = name.trim().toLowerCase()
+  const known = [...roster.map(c => c.path).filter(p => !p.startsWith(CLOUD_PREFIX)), ...hidden, ...spare]
+  const path = known.find(p => p.toLowerCase() === want || basename(p).toLowerCase() === want)
+  if (!path) return `No project named ${name}. Crew: ${roster.map(c => c.project).join(', ') || 'none'}${hidden.length ? `. Removed: ${hidden.map(basename).join(', ')}` : ''}`
+  const refused = await setAboard($, path, isAboard)
+  if (refused) return refused
+  return isAboard
+    ? `${basename(path)} is aboard the crew.`
+    : `${basename(path)} left the crew: off the crew decks, the hub roster and the sidebar emoji. The rest of the mod still runs there.`
+}
+
 // How many sessions one archive check reads from the app
 const SESSION_LIMIT = 1000
+
+// Put each live chat's crew emoji in front of its name in the sidebar, the same emoji the crew
+// decks show for that project, and take it off chats whose project has no sprite (removed, or
+// its sprite went to a newcomer). This chat comes from get_session (list_sessions leaves it out)
+async function tagChats($: EngineInterface, assigned: Record<string, string>) {
+  const sessions = appSessions.filter(s => !s.isArchived)
+  try {
+    const self = await $.mcp.call('ccd_session_mgmt', 'get_session', { session_id: 'self' })
+    const text = self.content.find(c => c.type === 'text')?.text
+    if (!self.isError && text) sessions.push({ ...(JSON.parse(text) as AppSession), sessionId: 'self' })
+  } catch {
+    // not in the desktop app: no sidebar to tag
+  }
+  for (const s of sessions) {
+    const project = projectOf(s.cwd) ?? ''
+    const emoji = SPRITES[assigned[project] ?? '']?.emoji
+    const title = emoji ? taggedTitle(s.title ?? '', emoji) : untaggedTitle(s.title ?? '')
+    if (!s.sessionId || tagRefused.has(s.sessionId) || title === s.title) continue
+    try {
+      const result = await $.mcp.call('ccd_session_mgmt', 'set_session_title', { session_id: s.sessionId, title })
+      if (result.isError) tagRefused.add(s.sessionId)
+    } catch {
+      tagRefused.add(s.sessionId)
+    }
+  }
+}
 
 // Project folders whose app sessions are all archived. Asks the desktop app's session list;
 // outside the app (no such server) nothing counts as archived
 async function archivedProjects($: EngineInterface): Promise<Set<string>> {
   const archived = new Set<string>()
   archiveProblem = undefined
+  appSessions = []
   try {
     const result = await $.mcp.call('ccd_session_mgmt', 'list_sessions', { include_archived: true, limit: SESSION_LIMIT })
     // Content blocks are not a tagged union, so read .text itself rather than narrow on type
@@ -145,7 +359,8 @@ async function archivedProjects($: EngineInterface): Promise<Set<string>> {
       archiveProblem = text?.slice(0, 160) ?? 'session list returned no text'
       return archived
     }
-    const sessions = JSON.parse(text) as { cwd?: string; isArchived?: boolean }[]
+    const sessions = JSON.parse(text) as AppSession[]
+    appSessions = sessions
     // A full page may leave out older live sessions: hide nothing rather than guess
     if (sessions.length >= SESSION_LIMIT) {
       archiveProblem = `over ${SESSION_LIMIT} sessions to check`
@@ -153,8 +368,7 @@ async function archivedProjects($: EngineInterface): Promise<Set<string>> {
     }
     const live = new Set<string>()
     for (const s of sessions) {
-      // A worktree session counts for the project it was cut from
-      const cwd = s.cwd?.replace(/\/\.claude\/worktrees\/.*$/, '')
+      const cwd = projectOf(s.cwd)
       if (cwd) (s.isArchived ? archived : live).add(cwd)
     }
     for (const cwd of live) archived.delete(cwd)
@@ -184,7 +398,7 @@ export function scanCrew($: EngineInterface): Promise<void> {
 async function runScan($: EngineInterface) {
   const home = await $.env.get('HOME')
   if (!home) return
-  const cwd = await $.session.cwd()
+  const cwd = projectOf(await $.session.cwd())!
   let entries: { name: string; mtimeMs: number }[] = []
   try {
     // fs.list gives 0 for a folder's mtimeMs; fs.stat has the real one
@@ -200,21 +414,45 @@ async function runScan($: EngineInterface) {
   const health = ((await $.store.get('health')) ?? {}) as Record<string, boolean>
   const assigned = ((await $.store.get('crewAssign')) ?? {}) as Record<string, string>
   const archived = await archivedProjects($)
+  const hidden = new Set(await hiddenProjects($))
   const now = await $.clock.now()
   const found: typeof roster = []
   const decks: Record<string, Deck> = {}
   const seen = new Set<string>()
   const picks = await cloudPicks($)
   const aboardLocal: { path: string; mtimeMs: number }[] = []
+  const spareFound: string[] = []
+  const cap = await crewCap($)
+  // Added folders that still exist always fit, a full crew of them at most; the newest of the
+  // rest fill what is left, and up to 6 more wait as spares for Add
+  const pinned = await Promise.all((await pathList($, 'crewAdded')).filter(p => !hidden.has(p)).map(async p => ((await $.fs.exists(p)) ? p : '')))
+  const added = pinned.filter(Boolean).slice(0, cap)
+  const others = cap - added.length
+  let regular = 0
   for (const entry of entries) {
-    if (aboardLocal.length >= 8 - picks.length) break
+    if (regular >= others && spareFound.length >= 6) break
+    // Scratch, temp and .claude chats never join: skip them before the costly decode
+    if (/^-(private|tmp)-|--claude-/.test(entry.name)) continue
     const path = await decodeProjectDir($, entry.name)
-    if (!path || seen.has(path) || /\/\.claude\/|\/tmp\/|\/private\/|\/Library\//.test(path) || path === home) continue
-    // Archived in the app: off the decks (this session's project always stays)
-    if (archived.has(path) && path !== cwd) continue
+    if (!path || seen.has(path) || hidden.has(path) || /\/\.claude\/|\/tmp\/|\/private\/|\/Library\//.test(path) || path === home) continue
+    const isAdded = added.includes(path)
+    // Archived in the app: off the decks (this session's project and added ones always stay)
+    if (archived.has(path) && path !== cwd && !isAdded) continue
     seen.add(path)
-    aboardLocal.push({ path, mtimeMs: entry.mtimeMs })
+    if (isAdded) aboardLocal.push({ path, mtimeMs: entry.mtimeMs })
+    else if (regular < others) {
+      aboardLocal.push({ path, mtimeMs: entry.mtimeMs })
+      regular += 1
+    } else spareFound.push(path)
   }
+  // An added folder with no chats here yet: its own modified time stands in
+  for (const path of added) {
+    if (seen.has(path)) continue
+    seen.add(path)
+    aboardLocal.push({ path, mtimeMs: await $.fs.stat(path).then(st => st.mtimeMs, () => 0) })
+  }
+  aboardLocal.sort((a, b) => b.mtimeMs - a.mtimeMs)
+  spare = spareFound
   // Uncommitted changes, checked for every project at once
   const changeCounts = await Promise.all(aboardLocal.map(async ({ path }) => {
     try {
@@ -239,20 +477,27 @@ async function runScan($: EngineInterface) {
     found.push(member)
     decks[member.path] = deck
   }
-  // Free the sprites of projects no longer aboard (archived, moved, or past the newest 8),
-  // then give each newcomer a free one; those aboard keep theirs. No two neighbors in the
-  // line-up wear the same shirt color: a clash swaps the later one for a free sprite that fits
+  // A project keeps its sprite for good, aboard or not, so the captain learns who is who; no
+  // sprite is ever switched. A newcomer takes a free sprite, avoiding its neighbor's shirt color
+  // when it can. With all eight taken, it takes one from a project no longer aboard (archived,
+  // moved, or past the newest 10), the one that got its sprite earliest
   const aboard = new Set(found.map(c => c.path))
-  for (const path of Object.keys(assigned)) if (!aboard.has(path)) delete assigned[path]
+  for (const path of hidden) delete assigned[path]
   for (const [i, c] of found.entries()) {
-    const prev = i > 0 ? shirtOf(assigned[found[i - 1]!.path]) : undefined
-    if (assigned[c.path] && shirtOf(assigned[c.path]) === prev) {
-      const swap = SPRITE_ORDER.find(k => !Object.values(assigned).includes(k) && shirtOf(k) !== prev)
-      if (swap) assigned[c.path] = swap
-    }
     if (!assigned[c.path]) {
-      const free = SPRITE_ORDER.filter(k => !Object.values(assigned).includes(k))
-      assigned[c.path] = free.find(k => shirtOf(k) !== prev) ?? free[0] ?? SPRITE_ORDER[i % SPRITE_ORDER.length]!
+      const prev = i > 0 ? shirtOf(assigned[found[i - 1]!.path]) : undefined
+      const held = new Set(Object.values(assigned))
+      const free = SPRITE_ORDER.filter(k => !held.has(k))
+      let pick = free.find(k => shirtOf(k) !== prev) ?? free[0]
+      if (!pick) {
+        const departed = Object.keys(assigned).filter(p => !aboard.has(p))
+        const gone = departed.find(p => shirtOf(assigned[p]) !== prev) ?? departed[0]
+        if (gone) {
+          pick = assigned[gone]
+          delete assigned[gone]
+        }
+      }
+      assigned[c.path] = pick ?? SPRITE_ORDER[i % SPRITE_ORDER.length]!
     }
     c.sprite = assigned[c.path]!
     c.name = SPRITES[c.sprite]?.name ?? 'Crew'
@@ -262,6 +507,7 @@ async function runScan($: EngineInterface) {
   lastScan = now
   await $.store.set('crewAssign', assigned)
   await $.store.set('crew', found.map((c, order) => ({ ...c, deck: decks[c.path], order })))
+  await tagChats($, assigned)
 }
 
 // ── Live decks shared between chats: each chat posts where its project's sprite stands in a
@@ -283,7 +529,7 @@ export async function postLiveDeck($: EngineInterface, deck: Deck | null) {
   if (deck === livePosted.deck && now - livePosted.at < 30000) return
   livePosted = { deck, at: now }
   try {
-    const path = await $.session.cwd()
+    const path = projectOf(await $.session.cwd())!
     await $.fs.write(`${await liveDir($)}/${liveName(path)}`, JSON.stringify({ path, deck, at: now }))
   } catch {
     // no shared folder: other chats keep their own guess
@@ -314,16 +560,18 @@ async function liveDecks($: EngineInterface): Promise<Record<string, Deck>> {
 
 export async function crewNow($: EngineInterface): Promise<CrewMember[]> {
   const live = await liveDecks($)
-  const cwd = await $.session.cwd()
+  const cwd = projectOf(await $.session.cwd())!
   const a = await read($, activity)
   const isInTurn = a.turnStartedAt !== null
   if (isInTurn) latestTurnStart = Math.max(latestTurnStart, a.turnStartedAt!)
+  // A worktree chat counts for its project, as its chat tag does
   return roster.map(c => {
     const isCurrent = c.path === cwd
-    // Mid-turn, this session's sprite follows the tool running now and holds still between tools.
-    // After the turn it waits for a scan taken since the turn began before it walks anywhere
-    const next: Deck | undefined = !isCurrent ? live[c.path] ?? baseDecks[c.path]
-      : isInTurn ? (a.current ? deckOfTool(a.current.tool) : undefined)
+    // While this chat's turn runs, every sprite holds still, so the picture never changes under a
+    // working pane (a changed picture makes the pane lose its scroll place). After the turn this
+    // session's sprite waits for a scan taken since the turn began before it walks anywhere
+    const next: Deck | undefined = isInTurn ? undefined
+      : !isCurrent ? live[c.path] ?? baseDecks[c.path]
       : lastScan >= latestTurnStart ? baseDecks[c.path] : undefined
     const deck = next ?? placed[c.path] ?? baseDecks[c.path] ?? 'quarters'
     placed[c.path] = deck
@@ -331,33 +579,49 @@ export async function crewNow($: EngineInterface): Promise<CrewMember[]> {
   })
 }
 
-export function crewSvg(crew: CrewMember[], width: number): string {
-  const height = DECKS.length * DECK_H + 8
+// The picture's shape depends on the crew size alone: every deck is full height, and the width fits
+// the whole crew on one deck. A picture that changes shape as sprites move makes the pane lose its
+// scroll place
+export function crewSvg(crew: CrewMember[], now: number): string {
+  const tops = DECKS.map((_, i) => 4 + i * DECK_H)
+  const height = 4 + DECKS.length * DECK_H + 4
+  // Wide enough for the whole crew on one deck and its name. It claims more width than any pane,
+  // so the surface always scales it to the box (height follows)
+  const width = Math.max(420, 14 + crew.length * SLOT_W + 140)
   const slots: Record<string, number> = {}
   let sprites = ''
   let style = ''
   crew.forEach((c, i) => {
     const row = DECKS.findIndex(d => d.id === c.deck)
     const slot = (slots[c.deck] = (slots[c.deck] ?? 0) + 1) - 1
-    const to = { x: 14 + slot * SLOT_W, y: 4 + row * DECK_H + 3 }
+    const to = { x: 14 + slot * SLOT_W, y: tops[row]! + 4 }
     const prev = walkTo[c.sprite]
     if (!prev || prev.x !== to.x || prev.y !== to.y) {
       walkFrom[c.sprite] = prev ?? to
       walkTo[c.sprite] = to
+      walkAt[c.sprite] = now
     }
     const from = walkFrom[c.sprite]!
-    const art = pixels(SPRITES[c.sprite]?.rows ?? SPRITES.data!.rows, CREW_PALETTE, 3)
-    style += `@keyframes w${i}{0%{transform:translate(${from.x}px,${from.y}px)}100%{transform:translate(${to.x}px,${to.y}px)}}.s${i}{transform:translate(${to.x}px,${to.y}px);animation:w${i} 1.8s steps(9) forwards}`
+    const art = pixels(SPRITES[c.sprite]?.rows ?? SPRITES.data!.rows, CREW_PALETTE, 4)
+    // Every redraw loads the picture afresh and restarts its animations, so the walk is drawn only
+    // while it is under way; after that the sprite stands where it arrived. Left in, it would replay
+    // from the old deck on each redraw and the sprite would jitter there, never arriving
+    const isWalking = now - (walkAt[c.sprite] ?? 0) < WALK_MS && (from.x !== to.x || from.y !== to.y)
+    style += isWalking
+      ? `@keyframes w${i}{0%{transform:translate(${from.x}px,${from.y}px)}100%{transform:translate(${to.x}px,${to.y}px)}}.s${i}{transform:translate(${to.x}px,${to.y}px);animation:w${i} ${WALK_MS / 1000}s steps(9) forwards}`
+      : `.s${i}{transform:translate(${to.x}px,${to.y}px)}`
     sprites += `<g class="s${i}"><g class="${c.isCurrent ? 'hop' : 'idle'}" style="animation-delay:${(i % 4) * 0.2}s">${art}</g>`
-      + `<text x="12" y="34" text-anchor="middle" font-family="Space Mono,monospace" font-size="7" fill="#f1ece4">${c.project.slice(0, 10).replace(/[<&>]/g, '')}</text>`
-      + (c.isCurrent ? '<rect x="2" y="-5" width="20" height="2" fill="#ffcc33" class="hop"/>' : '')
+      + `<text x="16" y="49" text-anchor="middle" font-family="Space Mono,monospace" font-size="10" fill="#f1ece4">${c.project.slice(0, 9).replace(/[<&>]/g, '')}</text>`
+      + (c.isCurrent ? '<rect x="4" y="-5" width="24" height="2" fill="#ffcc33" class="hop"/>' : '')
       + '</g>'
   })
-  const decks = DECKS.map((d, i) =>
-    `<rect x="0" y="${4 + i * DECK_H}" width="${width}" height="${DECK_H - 4}" rx="4" fill="#12121c"/>`
-    + `<rect x="0" y="${4 + i * DECK_H}" width="6" height="${DECK_H - 4}" fill="${d.color}"/>`
-    + `<text x="${width - 8}" y="${16 + i * DECK_H}" text-anchor="end" font-family="Antonio,Arial Narrow,sans-serif" font-size="10" letter-spacing="1" fill="${d.color}">${d.label}</text>`).join('')
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" shape-rendering="crispEdges">
+  const decks = DECKS.map((d, i) => {
+    const h = (tops[i + 1] ?? height - 4) - tops[i]! - 4
+    return `<rect x="0" y="${tops[i]}" width="${width}" height="${h}" rx="4" fill="#12121c"/>`
+      + `<rect x="0" y="${tops[i]}" width="6" height="${h}" fill="${d.color}"/>`
+      + `<text x="${width - 8}" y="${tops[i]! + 12}" text-anchor="end" font-family="Antonio,Arial Narrow,sans-serif" font-size="10" letter-spacing="1" fill="${d.color}">${d.label}</text>`
+  }).join('')
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${FILL_WIDTH}" height="${Math.round((FILL_WIDTH * height) / width)}" shape-rendering="crispEdges">
 <style>${style}
 @keyframes idle{0%,100%{transform:translateY(0)}50%{transform:translateY(-1px)}}
 @keyframes hop{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
@@ -397,6 +661,13 @@ export async function crewSessionStart($: EngineInterface) {
     description: 'Bring a cloud project (a GitHub repo, "owner/repo") aboard the Starfleet crew or send it ashore. Use when the captain archives a cloud session or asks to add or remove cloud crew.',
     inputSchema: { type: 'object', properties: { repo: { type: 'string', description: 'GitHub repo as owner/repo' }, aboard: { type: 'boolean', description: 'true to bring aboard, false to send ashore' } }, required: ['repo', 'aboard'] },
   })
+  await $.tool.register({
+    name: 'starfleet_crew',
+    description: 'Remove a project folder from the Starfleet crew, or add one. A removed folder leaves the crew decks, the hub roster and the sidebar emoji; the rest of the mod keeps running in its chats. An added one stays aboard. Use when the captain says a folder is not a project, or asks to add, remove, stop or start tracking one.',
+    inputSchema: { type: 'object', properties: { project: { type: 'string', description: 'The project folder name as the crew decks show it, or its full path' }, aboard: { type: 'boolean', description: 'false to remove it from the crew, true to add it' } }, required: ['project', 'aboard'] },
+  })
+  // Scan once at start, so this chat gets its crew emoji without waiting for a turn to end
+  void scanCrew($).catch(() => {})
   await $.command.register({ name: 'crew', description: 'Open the crew decks: your projects as 8-bit crew members, and pick cloud repos to bring aboard', immediate: true })
 }
 
@@ -414,6 +685,11 @@ export function registerCrew(on: On) {
     return { result: await setCloudPick($, e.repo, e.aboard) }
   })
 
+  on('tool.call', { tool: CREW_TOOL }, async ($: EngineInterface, e: { project?: unknown; aboard?: unknown }) => {
+    if (typeof e.project !== 'string' || !e.project || typeof e.aboard !== 'boolean') return { result: 'Give project (its folder name) and aboard (true or false).' }
+    return { result: await setProjectByName($, e.project, e.aboard) }
+  })
+
   on('command.run', { command: 'crew' }, async $ => {
     await scanCrew($)
     void loadRecentRepos($).then(() => $.ui.invalidate('ui.render'))
@@ -426,25 +702,27 @@ export function registerCrew(on: On) {
     const { Box, Text, Button } = el
     const crew = await crewNow($)
     const picks = await cloudPicks($)
+    const editor = await crewEditor($, el, crew, 'crew')
     const now = await $.clock.now()
     const width = Math.max(260, Math.min(560, ((e.props.bodyColumns ?? 50) - 2) * 8))
     return (
       <Box flexDirection="column" rowGap={1} padding="sm">
-        <Text backgroundColor={LCARS.blue} color={LCARS.ink} bold> CREW DECKS · {crew.length} ABOARD </Text>
+        <Text backgroundColor={HEAD_COLOR} color={LCARS.ink} bold> CREW DECKS · {crew.length} ABOARD </Text>
         {crew.length === 0 && <Text dimColor>Scanning for crew… no projects found in ~/.claude/projects yet.</Text>}
         {crew.length > 0 && ('Svg' in el
-          ? <el.Svg source={crewSvg(crew, width)} alt={crew.map(c => `${c.name} (${c.project}) on ${c.deck}`).join(', ')} width={width} height={DECKS.length * DECK_H + 8} isInteractive />
+          ? <Box width="100%"><el.Svg source={crewSvg(crew, now)} alt={crew.map(c => `${SPRITES[c.sprite]?.emoji ?? ''} ${c.name} (${c.project}) on ${c.deck}`).join(', ')} /></Box>
           : null)}
         <Box flexDirection="column">
           {crew.map(c => (
             <Text>
-              <Text color={LCARS.peach} bold>{c.name.padEnd(8)}</Text> {c.project.padEnd(18)} <Text color={LCARS.lilac}>{c.deck.padEnd(12)}</Text> <Text dimColor>{c.isCurrent ? 'this session · ' : ''}{c.status}</Text>
+              {SPRITES[c.sprite]?.emoji ?? '  '} <Text color={LCARS.peach} bold>{c.name.padEnd(8)}</Text> {c.project.padEnd(18)} <Text color={LCARS.lilac}>{c.deck.padEnd(12)}</Text> <Text dimColor>{c.isCurrent ? 'this session · ' : ''}{c.status}</Text>
             </Text>
           ))}
         </Box>
+        {editor}
         {archiveProblem && <Text dimColor>Archived projects not hidden: {archiveProblem}</Text>}
         <Button key="rescan" label="Rescan crew (r)" hotkey="r" onPress={async () => { await scanCrew($); $.ui.invalidate('ui.render') }} />
-        <Text backgroundColor={LCARS.lilac} color={LCARS.ink} bold> CLOUD CREW · PICK UP TO 4 REPOS </Text>
+        <Text backgroundColor={HEAD_COLOR} color={LCARS.ink} bold> CLOUD CREW · PICK UP TO 4 REPOS </Text>
         <Text dimColor>Cloud sessions leave no folder on this Mac. Pick the repos they work in to bring them aboard.</Text>
         {repoProblem && <Text dimColor>GitHub not reachable: {repoProblem}</Text>}
         {!repoProblem && recentRepos.length === 0 && <Text dimColor>Reading your GitHub repos…</Text>}

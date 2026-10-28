@@ -1,8 +1,11 @@
 {
   "name": "starfleet",
-  "version": "0.4.7",
-  "description": "Star Trek tour of mod powers: shield guard, a sensor tool Claude can call, Make it so, captain mode, warp band, away-team alerts and a service record",
+  "version": "0.4.9",
+  "description": "A Star Trek themed Claude Code mod: a crew member for each project that shows where Claude's work is at, a captain's log synced to your own hub page, a warp core that shows context and hands off to a new chat, and Shields against risky commands",
   "author": { "name": "Lauren" },
+  "homepage": "https://github.com/lorlola07/starfleet",
+  "repository": "https://github.com/lorlola07/starfleet",
   "license": "MIT",
+  "keywords": ["star-trek", "context", "handoff", "notes", "projects", "safety", "visual"],
   "types": "./types/index.d.ts"
 }

@@ -2,10 +2,11 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { ServiceRecord } from '../types'
-import { consoleSessionStart, registerConsole, rememberOrder } from './console'
+import { consoleSessionStart, logTyping, registerConsole, rememberOrder } from './console'
 import { coreSessionStart, registerCore } from './core'
-import { RANKS, errText, hashOf, pipsSvg, rankOf } from './shared'
-import { LCARS, hail } from './theme'
+import { RANKS, errText, hashOf, pipsSvg, rankOf, serial } from './shared'
+import { HEAD_COLOR, LCARS, hail } from './theme'
+import { registerAbout } from './about'
 import { crewSessionStart, crewTurnComplete, registerCrew } from './crew'
 import { logSessionStart, missionTurnComplete, recordsJson, registerLog } from './log'
 import { hostileReason } from './shields'
@@ -22,7 +23,8 @@ const PANE = 'starfleet-record'
 const SENSOR_TOOL = 'mcp__starfleet__sensor_scan'
 const SHIP_PANE = 'starfleet-ship'
 
-const STARSHIP_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 300">
+// Claims more width than any pane, so the surface scales it to fill its box (see crewSvg)
+const STARSHIP_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 300" width="1600" height="960">
   <defs>
     <radialGradient id="space" cx="50%" cy="40%" r="80%"><stop offset="0" stop-color="#1b1f4a"/><stop offset="1" stop-color="#05060f"/></radialGradient>
     <linearGradient id="hull" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#eef1f6"/><stop offset="1" stop-color="#8d96a8"/></linearGradient>
@@ -84,14 +86,32 @@ const LIFE = ['No life signs', '3 life signs, humanoid', 'Thousands of life sign
 // Redraw once a second during a turn, for the live timers (the Svg art animates itself)
 let tickTimer: Timer | undefined
 
+// The record only ever counts up. Each count reads the saved record first and keeps the higher of
+// it and this chat's copy, field by field, so a chat that counts before its copy has loaded (a
+// new chat, a reload), or one that is behind another chat, never writes lower numbers over it
+const recordLock = serial()
+
+function higher(a: Partial<ServiceRecord> | undefined, b: ServiceRecord): ServiceRecord {
+  return {
+    sessions: Math.max(a?.sessions ?? 0, b.sessions),
+    turns: Math.max(a?.turns ?? 0, b.turns),
+    blocked: Math.max(a?.blocked ?? 0, b.blocked),
+    scans: Math.max(a?.scans ?? 0, b.scans),
+  }
+}
+
 async function bumpRecord($: EngineInterface, key: keyof ServiceRecord) {
-  await update($, record, r => ({ ...r, [key]: r[key] + 1 }))
-  await $.store.set('record', await read($, record))
+  await recordLock(async () => {
+    const merged = higher((await $.store.get('record')) as Partial<ServiceRecord> | undefined, await read($, record))
+    const next = { ...merged, [key]: merged[key] + 1 }
+    await $.store.set('record', next)
+    await update($, record, () => next)
+  })
 }
 
 async function loadRecord($: EngineInterface) {
   const saved = (await $.store.get('record')) as Partial<ServiceRecord> | undefined
-  if (saved) await update($, record, r => ({ ...r, ...saved }))
+  await update($, record, r => higher(saved, r))
 }
 
 export const register: Register = on => {
@@ -102,6 +122,7 @@ export const register: Register = on => {
   registerLog(on)
   registerCrew(on)
   registerConsole(on)
+  registerAbout(on)
 
   on('session.start', async ($, e, next) => {
     // Cheap registrations first, then each module on its own: one failing start never stops the rest
@@ -245,7 +266,9 @@ export const register: Register = on => {
     await opsTurnStart($, e.agentId)
     if (!e.agentId) {
       tickTimer?.cancel()
-      tickTimer = $.clock.every(1000, () => $.ui.invalidate('ui.render'))
+      tickTimer = $.clock.every(1000, async () => {
+        if ((await $.clock.now()) >= logTyping.until) $.ui.invalidate('ui.render')
+      })
       $.ui.invalidate('ui.render')
     }
     return next(e)
@@ -283,12 +306,11 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: SHIP_PANE }, async ($, e) => {
     const el = $.ui.resolve(e)
     const { Box, Text } = el
-    const width = Math.max(240, Math.min(520, ((e.props.bodyColumns ?? 60) - 2) * 8))
     return (
       <Box flexDirection="column" rowGap={1} padding="sm">
-        <Text backgroundColor={LCARS.orange} color={LCARS.ink} bold> VIEWSCREEN · USS CLAUDE · NCC-2026 </Text>
+        <Text backgroundColor={HEAD_COLOR} color={LCARS.ink} bold> VIEWSCREEN · USS CLAUDE · NCC-2026 </Text>
         {'Svg' in el
-          ? <el.Svg source={STARSHIP_SVG} alt="A starship with a saucer hull and two glowing warp nacelles, cruising past a ringed planet" width={width} height={Math.round(width * 0.6)} />
+          ? <Box width="100%"><el.Svg source={STARSHIP_SVG} alt="A starship with a saucer hull and two glowing warp nacelles, cruising past a ringed planet" /></Box>
           : <Text color={LCARS.violet}>{STARSHIP_ASCII}</Text>}
         <Text dimColor italic>Captain, she’s holding together. Mostly.</Text>
       </Box>
@@ -317,7 +339,7 @@ export const register: Register = on => {
     )
     return (
       <Box flexDirection="column" rowGap={1} padding="sm">
-        <Text backgroundColor={LCARS.orange} color={LCARS.ink} bold> STARFLEET SERVICE RECORD </Text>
+        <Text backgroundColor={HEAD_COLOR} color={LCARS.ink} bold> STARFLEET SERVICE RECORD </Text>
         <Box flexDirection="row" columnGap={2} alignItems="center">
           {'Svg' in el
             ? <el.Svg source={pipsSvg(rank.pips)} alt={`${rank.pips} rank pips`} width={rank.pips * 26 + 18} height={40} />

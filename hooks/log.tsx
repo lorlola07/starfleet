@@ -3,7 +3,7 @@ import type { EngineInterface, On } from 'claude-code'
 import type { CrewMember, LogEntry, Mission } from '../types'
 import { scanCrew } from './crew'
 import { HUB_TEMPLATE, basename, isHubUrl, serial, stardate } from './shared'
-import { LCARS } from './theme'
+import { HEAD_COLOR, LCARS } from './theme'
 import { readVoyage } from './voyage'
 
 // Captain's log quick capture, mission history, and the records tool the computer reads.
@@ -14,16 +14,12 @@ const LOG_PANE = 'starfleet-log'
 const KEEP_SESSIONS = 20
 const ARCHIVE_KEY = 'logArchive'
 const ARCHIVE_MAX = 1000
-// Keys kept per session: log:<id>, missions:<id>, voyage:<id>, lastPrompt:<id>
-const PER_SESSION = /^(log|missions|voyage|lastPrompt):(.+)$/
+// Keys kept per session: log:<id>, missions:<id>, voyage:<id>, lastPrompt:<id>, briefing:<id>,
+// coreAlert:<id>, logDraft:<id>
+const PER_SESSION = /^(log|missions|voyage|lastPrompt|briefing|coreAlert|logDraft):(.+)$/
 
 let draftKey = 0
 
-// What an entry can be filed under, picked beside the log field; a Note carries no prefix
-export const LOG_FILES = ['Note', 'Idea', 'Bug', 'To-do', 'Decision'] as const
-export function filed(under: string, text: string): string {
-  return under === 'Note' ? text : `${under}: ${text}`
-}
 
 async function logKey($: EngineInterface) {
   return `log:${await $.session.id()}`
@@ -68,7 +64,7 @@ export async function readLog($: EngineInterface): Promise<LogEntry[]> {
   return parseLog(await $.store.get(await logKey($)))
 }
 
-// Every kept session's entries and the archive, newest first: what the briefing and Save read
+// Every kept session's entries and the archive, newest first: what the briefing reads
 export async function readRecentLogs($: EngineInterface): Promise<LogEntry[]> {
   const saved = await $.store.get('logSessions')
   const ids = Array.isArray(saved) ? (saved as string[]) : []
@@ -78,14 +74,79 @@ export async function readRecentLogs($: EngineInterface): Promise<LogEntry[]> {
 
 function parseLog(saved: unknown): LogEntry[] {
   if (!Array.isArray(saved)) return []
-  // Entries from the first version had no id or time
+  // Entries from the first version had no id or time. The stardate is rebuilt from the time,
+  // so entries saved in an older stardate format read (and sync) in today's
   return (saved as Partial<LogEntry>[]).map((e, i) => ({
     id: e.id ?? `old-${i}`,
-    stardate: e.stardate ?? '—',
+    stardate: e.at ? stardate(e.at) : e.stardate ?? '—',
     text: e.text ?? '',
     at: e.at ?? 0,
     project: e.project ?? '',
   }))
+}
+
+// Entries recorded while there is no hub yet (store key hubPending): sent once a hub is set
+type PendingEntry = { id: string; doc: Record<string, unknown> }
+const PENDING_MAX = 200
+const pendingLock = serial()
+
+async function readPending($: EngineInterface): Promise<PendingEntry[]> {
+  const saved = await $.store.get('hubPending')
+  return Array.isArray(saved) ? (saved as PendingEntry[]) : []
+}
+
+// Hand over the held entries once, clearing them: the instruction that writes them to the hub
+async function takePending($: EngineInterface): Promise<string | undefined> {
+  const pending = await pendingLock(async () => {
+    const held = await readPending($)
+    if (held.length) await $.store.delete('hubPending')
+    return held
+  })
+  if (!pending.length) return undefined
+  return `Also add the captain's log entries recorded before the hub existed: with ArtifactData in one batch, set each in collection "log" (doc id = its id, data = its doc): ${JSON.stringify(pending)}`
+}
+
+// Write the hub's database straight through the ArtifactData tool, with no chat turn. False when the
+// tool is missing, refused or errors, so the caller can fall back to asking Claude
+async function writeHub($: EngineInterface, hub: string, writes: Record<string, unknown>[], consent: string): Promise<boolean> {
+  try {
+    const out = await $.tool.call({ tool: 'ArtifactData', action: 'batch', url: hub, writes, consent } as never) as { deny?: unknown; isError?: boolean; text?: string }
+    if (!out.deny && !out.isError) return true
+    await $.store.set('hubWriteError', { at: await $.clock.now(), deny: String(out.deny ?? ''), text: String(out.text ?? '').slice(0, 500) })
+    return false
+  } catch (error) {
+    await $.store.set('hubWriteError', { at: await $.clock.now(), thrown: String(error).slice(0, 500) })
+    return false
+  }
+}
+
+// A hub doc's current version, or undefined when it isn't there or can't be read
+async function hubVersion($: EngineInterface, hub: string, collection: string, id: string): Promise<number | undefined> {
+  try {
+    const out = await $.tool.call({ tool: 'ArtifactData', action: 'get', url: hub, collection, doc_id: id } as never) as { text?: string; isError?: boolean }
+    const match = !out.isError && out.text?.match(/"version":(\d+)/)
+    return match ? Number(match[1]) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// Send one new entry to the hub right away, written straight to its database; a short Claude turn
+// only if that fails. With no hub yet it is held, and goes when the hub is set
+export async function sendEntryToHub($: EngineInterface, entry: LogEntry) {
+  const hub = await hubUrl($)
+  const doc = { stardate: entry.stardate, text: entry.text, at: entry.at, project: entry.project, session: await $.session.id() }
+  if (!hub) {
+    await pendingLock(async () => $.store.set('hubPending', [...(await readPending($)).filter(p => p.id !== entry.id), { id: entry.id, doc }].slice(-PENDING_MAX)))
+    $.ui.toast('📓 Logged. It goes to your hub once you have one (Close mission sets it up).')
+    return
+  }
+  if (await writeHub($, hub, [{ op: 'set', collection: 'log', doc_id: entry.id, data: doc }], 'The user pressed Record on the captain\'s log to save this note to their Starfleet Command hub.')) return
+  void $.prompt.submit({ text: [
+    `Add one captain's log entry to the Starfleet Command hub (${hub}).`,
+    `With ArtifactData, set collection "log", doc id "${entry.id}", data ${JSON.stringify(doc)}.`,
+    'Touch nothing else. Reply in one short line.',
+  ].join('\n') }).catch(() => {})
 }
 
 export async function addLogEntry($: EngineInterface, text: string): Promise<LogEntry> {
@@ -98,14 +159,49 @@ export async function addLogEntry($: EngineInterface, text: string): Promise<Log
   return entry
 }
 
+// Ask first, naming the entry, with Keep as the default answer
+async function confirmDeleteEntry($: EngineInterface, entry: LogEntry) {
+  const gist = entry.text.length > 40 ? entry.text.slice(0, 39) + '…' : entry.text
+  let answer: string | undefined
+  try {
+    answer = await $.ui.ask(`Delete the log entry "${gist}"?`, { header: 'Log', options: ['Keep', 'Delete entry'] })
+  } catch {
+    return // dismissed: nothing changes
+  }
+  if (answer === 'Delete entry') await deleteLogEntry($, entry.id)
+}
+
+// Delete here and on the hub: logDeleted keeps later syncs from bringing it back
 export async function deleteLogEntry($: EngineInterface, id: string) {
+  const entry = (await readLog($)).find(e => e.id === id)
   await $.store.set(await logKey($), (await readLog($)).filter(e => e.id !== id))
+  await pendingLock(async () => {
+    const held = await readPending($)
+    if (held.some(p => p.id === id)) await $.store.set('hubPending', held.filter(p => p.id !== id))
+  })
   $.ui.invalidate('ui.render')
+  const hub = await hubUrl($)
+  if (!hub) return
+  const tombstone = { at: await $.clock.now(), project: entry?.project ?? '' }
+  // The tombstone alone first, so a log doc that's already gone can't fail the batch
+  const consent = 'The user pressed Delete entry on a captain\'s log note to remove it from their Starfleet Command hub.'
+  if (await writeHub($, hub, [{ op: 'set', collection: 'logDeleted', doc_id: id, data: tombstone }], consent)) {
+    // Deleting an existing doc needs its current version, read first
+    const version = await hubVersion($, hub, 'log', id)
+    if (version) await writeHub($, hub, [{ op: 'delete', collection: 'log', doc_id: id, if_version: version }], consent)
+    return
+  }
+  void $.prompt.submit({ text: [
+    `Delete one captain's log entry from the Starfleet Command hub (${hub}).`,
+    `With ArtifactData in one batch: set collection "logDeleted", doc id "${id}", data ${JSON.stringify(tombstone)}, and delete collection "log", doc id "${id}" (skip the delete if that doc is not there).`,
+    'Touch nothing else. Reply in one short line.',
+  ].join('\n') }).catch(() => {})
 }
 
 async function readMissions($: EngineInterface): Promise<Mission[]> {
   const saved = await $.store.get(await missionKey($))
-  return Array.isArray(saved) ? (saved as Mission[]) : []
+  // The stardate is rebuilt from the start time, as for log entries
+  return Array.isArray(saved) ? (saved as Mission[]).map(m => (m.at ? { ...m, stardate: stardate(m.at) } : m)) : []
 }
 
 // One mission per session; change it in place
@@ -172,13 +268,6 @@ function pluginsOf(m: Mission): { plugins: string[]; mcpServers: string[] } {
     if (prefix.length > 1) plugins.add(prefix[0]!)
   }
   return { plugins: [...plugins], mcpServers: [...mcpServers] }
-}
-
-export async function saveMarkdown($: EngineInterface) {
-  const log = await readRecentLogs($)
-  const lines = ['# Captain’s log', '', ...log.map(e => `- **${e.stardate}**${e.project ? ` · ${e.project}` : ''}: ${e.text}`), '']
-  await $.fs.write('captains-log.md', lines.join('\n'))
-  $.ui.toast(`📓 Saved ${log.length} entries to captains-log.md`)
 }
 
 export async function sendClosure($: EngineInterface) {
@@ -313,22 +402,25 @@ export function registerLog(on: On) {
     if (!isHubUrl(url)) return { result: `Not saved: "${url}" is not a claude.ai artifact URL. Pass the URL the Artifact tool returned.` }
     await setHubUrl($, url)
     $.ui.invalidate('ui.render')
-    return { result: `Hub saved: ${url}` }
+    const pending = await takePending($)
+    return { result: [`Hub saved: ${url}`, pending].filter(Boolean).join('\n') }
   })
 
   on('command.run', { command: 'hub' }, async ($, e) => {
     const arg = e.args.trim()
     if (arg === 'clear') {
       await setHubUrl($, undefined)
-      return { text: 'Hub forgotten. The next sync publishes a new one.' }
+      return { text: 'Hub forgotten. Your next Close mission publishes a new one. Notes you Record are held for it until then.' }
     }
     if (arg) {
       if (!isHubUrl(arg)) return { text: 'That is not a claude.ai artifact link. Use /hub https://claude.ai/artifact/…' }
       await setHubUrl($, arg)
+      const pending = await takePending($)
+      if (pending) void $.prompt.submit({ text: `Starfleet Command hub (${arg}). ${pending.replace(/^Also add/, 'Add')} Touch nothing else. Reply in one short line.` }).catch(() => {})
       return { text: `Starfleet Command hub set: ${arg}` }
     }
     const hub = await hubUrl($)
-    return { text: hub ? `Starfleet Command hub: ${hub}` : 'No hub yet. Press Sync in /log or /starfleet and Claude publishes your own.' }
+    return { text: hub ? `Starfleet Command hub: ${hub}` : 'No hub yet. Press Close mission in the /starfleet console and Claude publishes your own.' }
   })
 
   on('command.run', { command: 'closure' }, async $ => {
@@ -341,6 +433,7 @@ export function registerLog(on: On) {
     if (text) {
       const entry = await addLogEntry($, text)
       $.ui.toast(`📓 Logged at stardate ${entry.stardate}`)
+      await sendEntryToHub($, entry)
       return {}
     }
     const opened = await $.ui.open({ id: LOG_PANE, title: '📓 Captain’s log', focus: true, closeOnEscape: true })
@@ -355,20 +448,19 @@ export function registerLog(on: On) {
     return (
       <Box flexDirection="column" rowGap={1} padding="sm">
         <Box flexDirection="row" columnGap={1}>
-          <Text backgroundColor={LCARS.peach} color={LCARS.ink} bold> CAPTAIN’S LOG </Text>
+          <Text backgroundColor={HEAD_COLOR} color={LCARS.ink} bold> CAPTAIN’S LOG </Text>
           <Text color={LCARS.lilac}>Stardate {stardate(await $.clock.now())}</Text>
         </Box>
         {'Input' in el && (
           <el.Input
             key={'entry-' + draftKey}
             label="Log"
-            placeholder="Idea: tribbles as a test fixture"
             value=""
             submitLabel="Record"
             autoFocus
             onSubmit={async value => {
               if (!value.trim()) return
-              await addLogEntry($, value.trim())
+              await sendEntryToHub($, await addLogEntry($, value.trim()))
               draftKey += 1
               $.ui.invalidate('ui.render')
             }}
@@ -378,7 +470,7 @@ export function registerLog(on: On) {
           {log.length === 0 && <Text dimColor>No entries yet. Tip: type /log and a note at the prompt, from anywhere.</Text>}
           {log.slice(0, 12).map(entry => (
             <Box flexDirection="row" columnGap={1}>
-              <Button key={'del-' + entry.id} label="x" plain dimColor onPress={() => deleteLogEntry($, entry.id)} />
+              <Button key={'del-' + entry.id} label="Delete" plain dimColor onPress={() => confirmDeleteEntry($, entry)} />
               <Text color={LCARS.peach}>{entry.stardate}</Text>
               <Text>{entry.text}</Text>
               {entry.project && <Text dimColor>· {entry.project}</Text>}
@@ -386,18 +478,7 @@ export function registerLog(on: On) {
           ))}
           {log.length > 12 && <Text dimColor>…and {log.length - 12} more in the hub</Text>}
         </Box>
-        <Box flexDirection="row" columnGap={2} flexWrap="wrap">
-          <Button key="sync" label="Sync to hub (s)" hotkey="s" variant="primary" onPress={() => {
-            void syncPrompt($).then(text => $.prompt.submit({ text })).catch(() => {})
-            $.ui.toast('📡 Transmitting records to Starfleet Command…')
-          }} />
-          <Button key="md" label="Save as .md (m)" hotkey="m" onPress={() => saveMarkdown($)} />
-          <Button key="ask" label="Ask Claude (a)" hotkey="a" onPress={() => {
-            void $.prompt.fill({ text: 'Using my captain’s log, ', mode: 'replace' }).catch(() => {})
-            void $.ui.close({ id: LOG_PANE }).catch(() => {})
-          }} />
-        </Box>
-        {hub ? <Link href={hub} label="Open Starfleet Command →" /> : <Text dimColor>No hub yet. Sync publishes your own Starfleet Command hub.</Text>}
+        {hub ? <Link href={hub} label="Open Starfleet Command →" /> : <Text dimColor>No hub yet. Close mission in the console publishes your own Starfleet Command hub.</Text>}
       </Box>
     )
   })

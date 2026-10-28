@@ -14,6 +14,8 @@ export type Voyage = {
   scans: number
   greenBuilds: number
   lastBuild: 'pass' | 'fail' | null
+  // When the last test or build command ran; voyages saved before it have none
+  lastBuildAt: number | null
   commits: number
 }
 
@@ -31,6 +33,7 @@ export async function readVoyage($: EngineInterface): Promise<Voyage> {
     scans: saved?.scans ?? 0,
     greenBuilds: saved?.greenBuilds ?? 0,
     lastBuild: saved?.lastBuild ?? null,
+    lastBuildAt: saved?.lastBuildAt ?? null,
     commits: saved?.commits ?? 0,
   }
 }
@@ -44,15 +47,24 @@ export async function updateVoyage($: EngineInterface, fn: (v: Voyage) => Voyage
 // Stages of a voyage, from orbit to a landing (a commit); the console draws them as a meter
 export const COURSE = ['HOLDING ORBIT', 'SURVEYING', 'UNDER WAY', 'MISSION ADVANCING', 'LANDING PARTY ASHORE'] as const
 
-export function courseOf(v: Voyage): { stage: number; label: string; detail: string; isBreach: boolean } {
+// Coarse on purpose: the course line must not tick every second
+function ago(ms: number): string {
+  const m = Math.floor(Math.max(0, ms) / 60000)
+  return m < 1 ? 'just now' : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`
+}
+
+export function courseOf(v: Voyage, now: number): { stage: number; label: string; detail: string; isBreach: boolean } {
   const files = v.files.length
+  // "Last check" is the newest test or build command, with when it ran
+  const lastCheck = v.lastBuild && `last check ${v.lastBuild === 'fail' ? 'failed' : 'passed'}${v.lastBuildAt ? ' ' + ago(now - v.lastBuildAt) : ''}`
   const parts = [
     files && `${files} file${files === 1 ? '' : 's'} changed`,
-    v.greenBuilds && `${v.greenBuilds} green build${v.greenBuilds === 1 ? '' : 's'}`,
+    v.greenBuilds && `tests passed ${v.greenBuilds === 1 ? 'once' : `${v.greenBuilds} times`}`,
     v.commits && `${v.commits} commit${v.commits === 1 ? '' : 's'}`,
   ].filter(Boolean) as string[]
   const stage = v.commits ? 4 : v.greenBuilds && files ? 3 : files ? 2 : v.scans ? 1 : 0
-  if (v.lastBuild === 'fail') return { stage, label: 'HULL BREACH', detail: ['last build failed', ...parts].join(' · '), isBreach: true }
+  if (v.lastBuild === 'fail') return { stage, label: 'HULL BREACH', detail: [lastCheck, ...parts].join(' · '), isBreach: true }
+  if (lastCheck) parts.push(lastCheck)
   const detail = parts.length ? parts.join(' · ') : v.scans ? `${v.scans} sensor sweeps, nothing changed yet` : 'no course plotted'
   return { stage, label: COURSE[stage]!, detail, isBreach: false }
 }
