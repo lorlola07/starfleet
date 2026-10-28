@@ -5,7 +5,7 @@ import { buildBriefing, currentBriefing, dismissBriefing } from './briefing'
 import { TIER_TEXT, coreFlags, coreSvg, ejectCore, tierOf } from './core'
 import { openAbout } from './about'
 import { DECKS, DECK_H, crewEditor, crewNow, crewSvg, scanCrew } from './crew'
-import { addLogEntry, sendEntryToHub, crewSyncPrompt, readLog, sendClosure } from './log'
+import { addLogEntry, sendEntryToHub, crewSyncPrompt, readLog, sendClosure, syncCrewToHub } from './log'
 import { isAiOn, setAi } from './prefs'
 import { redAlertSvg, toggleRedAlert } from './ops'
 import { RANKS, SPRITES, SPRITE_COLORS, basename, pipsSvg, rankOf, stardate } from './shared'
@@ -421,6 +421,11 @@ export function registerConsole(on: On) {
         <Button key="rescan" label="Rescan + sync crew" hotkey="n" plain onPress={() => pressed($, async () => {
           await scanCrew($)
           $.ui.invalidate('ui.render')
+          // Straight to the hub in the background; only if that fails does Claude get asked in the chat
+          if (await syncCrewToHub($)) {
+            $.ui.toast('📡 Crew rescanned and synced to Starfleet Command.')
+            return
+          }
           void $.prompt.submit({ text: await crewSyncPrompt($) }).catch(() => {})
           $.ui.toast('📡 Crew rescanned. Sending the roster to Starfleet Command…')
         })} />

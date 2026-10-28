@@ -70,6 +70,23 @@ export function parse(command: string): Parsed {
     return undefined
   }
 
+  // From just inside ${, the index of its closing brace: a brace inside quotes or a nested command
+  // doesn't count. None on the same line is -1, and ${ is then read as plain characters (fail closed)
+  const closeBrace = (from: number) => {
+    for (let j = from, depth = 1; j < command.length; j++) {
+      const ch = command[j]
+      if (ch === '\n') return -1
+      if (ch === '\\') { j++; continue }
+      if (ch === "'") { j = command.indexOf("'", j + 1); if (j < 0) return -1; continue }
+      if (ch === '"') { j = skipDouble(j); continue }
+      if (ch === '`') { j = command.indexOf('`', j + 1); if (j < 0) return -1; continue }
+      if (ch === '$' && command[j + 1] === '(') { j = closeParen(j + 1); continue }
+      if (ch === '{') depth++
+      if (ch === '}' && --depth === 0) return j
+    }
+    return -1
+  }
+
   // The delimiter word after << (or <<-) at `from`: quotes and escapes are taken off, and any of them
   // makes it a quoted delimiter
   const delimiter = (from: number) => {
@@ -100,9 +117,10 @@ export function parse(command: string): Parsed {
   // delimiter line. An unquoted body still runs its $(…) and `…`, so those are collected
   const readBodies = () => {
     const line = segments.slice(lineStart)
-    const carriesOn = /[|&]$/.test(command.slice(lineStartAt, i - 1).trimEnd())
-    const isText = !carriesOn && line.length > 0
-      && line.every(words => TEXT_READERS.has(nameOf(words.find(w => !ASSIGNMENT.test(w)) ?? '')))
+    // Only text when the line is one plain command a text reader runs: no pipe, list, group, comment
+    // or nested command anywhere on it, so nothing can carry the body on to something that runs it
+    const isText = line.length === 1 && !/[|&;(){}#`]/.test(command.slice(lineStartAt, i - 1))
+      && TEXT_READERS.has(nameOf(line[0]!.find(w => !ASSIGNMENT.test(w)) ?? ''))
     for (const doc of pending.splice(0)) {
       const start = i
       const lines: string[] = []
@@ -151,13 +169,8 @@ export function parse(command: string): Parsed {
     }
     // ${ … } is one word, kept as written: a << in it is never a here-document. Any $(…) or `…` inside
     // still runs, so those are collected
-    if (c === '$' && command[i + 1] === '{') {
-      let end = i + 2
-      for (let depth = 1; end < command.length; end++) {
-        if (command[end] === '\\') { end++; continue }
-        if (command[end] === '{') depth++
-        if (command[end] === '}' && --depth === 0) break
-      }
+    if (c === '$' && command[i + 1] === '{' && closeBrace(i + 2) >= 0) {
+      const end = closeBrace(i + 2)
       const saved = word
       for (let j = i + 2; j < end; j++) {
         if (command[j] === '\\') { j++; continue }

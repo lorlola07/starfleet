@@ -333,6 +333,40 @@ export async function closurePrompt($: EngineInterface, now: number): Promise<st
 }
 
 // The crew alone, sent after a rescan
+// The ids and versions of every doc in one hub collection, or undefined when it can't be read
+async function hubDocs($: EngineInterface, hub: string, collection: string): Promise<Map<string, number> | undefined> {
+  try {
+    const out = await $.tool.call({ tool: 'ArtifactData', action: 'list', url: hub, collection, query: { limit: 100 } } as never) as { text?: string; isError?: boolean }
+    if (out.isError || out.text === undefined) return undefined
+    const docs = new Map<string, number>()
+    for (const m of out.text.matchAll(/\{"id":"([^"]+)".*?"version":(\d+)/g)) docs.set(m[1]!, Number(m[2]))
+    return docs
+  } catch {
+    return undefined
+  }
+}
+
+// Sync the crew roster to the hub straight through the ArtifactData tool, with no chat turn, the
+// way captain's log entries go. False when it can't (no hub, no crew, a refused or failed call), so
+// the caller can fall back to asking Claude
+export async function syncCrewToHub($: EngineInterface): Promise<boolean> {
+  const hub = await hubUrl($)
+  if (!hub) return false
+  // The sync deletes hub crew missing from the roster, so never sync an unscanned, empty one
+  const crew = ((await $.store.get('crew')) ?? []) as CrewMember[]
+  if (!crew.length) return false
+  const existing = await hubDocs($, hub, 'crew')
+  if (!existing) return false
+  const pin = (id: string) => (existing.has(id) ? { if_version: existing.get(id) } : {})
+  const writes: Record<string, unknown>[] = crew.map((c, order) => ({
+    op: 'set', collection: 'crew', doc_id: c.sprite, ...pin(c.sprite),
+    data: { name: c.name, sprite: c.sprite, project: c.project, deck: c.deck, status: c.status, order },
+  }))
+  const aboard = new Set(crew.map(c => c.sprite))
+  for (const id of existing.keys()) if (!aboard.has(id)) writes.push({ op: 'delete', collection: 'crew', doc_id: id, ...pin(id) })
+  return writeHub($, hub, writes, 'The user pressed Rescan + sync crew on the Starfleet console to update the crew roster on their Starfleet Command hub.')
+}
+
 export async function crewSyncPrompt($: EngineInterface): Promise<string> {
   return [
     ...(await hubOpening($, 'Sync the crew roster to the Starfleet Command hub artifact')),

@@ -31,6 +31,10 @@ test('shields catch destructive commands however they are written', async () => 
     "cat <<'EOF' |\nrm -rf x\nEOF\nbash", "cat <<'EOF' &&\nrm -rf x\nEOF\nbash",
     // a << in ${…} is never a here-document, so the next line is still judged
     'echo ${x:-<<E}\nrm -rf x\nE', 'echo "${x}" ${y:-<<E}\ngit reset --hard\nE',
+    // a quoted brace can't end or stretch ${…}, and a line that could carry on has its body judged
+    "echo ${x:-'{'}; rm -rf x", 'echo ${x:-"}"}; rm -rf x', 'echo ${x:-$(echo })}; rm -rf x',
+    "cat <<'E' | # note\nrm -rf x\nE\nbash", "cat <<'E' | {\nrm -rf x\nE\nbash; }", "{ cat <<'E'\nrm -rf x\nE\n} | bash",
+    "cat <<'A' > a.md && cat <<'B' > b.md\ngit push -f\nA\nrm -rf ~\nB",
     // a << in arithmetic is a shift, not a here-document, so the next line is still judged
     '(( y = 1<<2 ))\nrm -rf x\n2', 'echo $[1<<2]\nrm -rf x\n2', 'x=$((1<<2))\nrm -rf x', '((cd a; rm -rf x))',
     '(( $(rm -rf x) ))',
@@ -59,7 +63,6 @@ test('shields let ordinary commands through, even ones that mention danger', asy
     "cat > f.md <<'EOF'\nyou'd use git reset --hard\nEOF",
     "python3 - <<'EOF'\nprint(\"git reset --hard\")\nEOF",
     "cat <<\"EOF\" > a.md\n$(rm -rf x)\nEOF",
-    "cat <<'A' > a.md && cat <<'B' > b.md\ngit push -f\nA\nrm -rf ~\nB",
     "grep x <<<'rm -rf x'",
     "tee a.md <<'EOF'\ngit push -f\nEOF", "cat > a.md <<'EOF'\nset ${HOME} aside\nrm -rf ~\nEOF",
     'rm -r ${HOME:-x}/build',

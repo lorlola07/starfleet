@@ -1297,3 +1297,28 @@ test('a worktree chat counts as its project\'s crew member, so the planet takes 
   expect(String(screen?.props.source)).toContain(SPRITE_COLORS[mod.sprite]!)
   await ui.unmount()
 })
+
+test('Rescan + sync crew updates the hub in the background, with no chat message', async ($, on) => {
+  const store = engine(on)
+  const sent: string[] = []
+  on('prompt.submit', (_: unknown, e: { text: string }) => { sent.push(e.text); return { text: e.text } })
+  store.hubUrl = 'https://claude.ai/artifact/hub1'
+  const hub: { action: string; writes?: { op: string; doc_id: string; if_version?: number }[] }[] = []
+  on('tool.call', (_: unknown, e: { tool: string; action?: string }) => {
+    if (e.tool !== 'ArtifactData') return { result: 'ok' }
+    hub.push(e as never)
+    // On the hub now: an old crew member who has left, at version 4
+    return e.action === 'list' ? { result: 'ok', text: '{"id":"crusher","data":{"name":"Crusher"},"version":4}' } : { result: 'ok', text: 'committed' }
+  })
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
+  if (!(await ui.find({ type: 'Button', key: 'rescan' }))) await ui.press({ key: 'sec-crew' })
+  await ui.press({ key: 'rescan' })
+  await new Promise(done => setTimeout(done, 20))
+  expect(sent.some(t => t.includes('Sync the crew roster'))).toBe(false)
+  const batch = hub.find(h => h.action === 'batch')!
+  const crew = store.crew as { sprite: string }[]
+  expect(batch.writes!.filter(w => w.op === 'set').map(w => w.doc_id)).toEqual(crew.map(c => c.sprite))
+  expect(batch.writes!.find(w => w.op === 'delete')).toEqual(expect.objectContaining({ doc_id: 'crusher', if_version: 4 }))
+  await ui.unmount()
+})

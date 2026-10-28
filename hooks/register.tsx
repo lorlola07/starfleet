@@ -267,7 +267,8 @@ export const register: Register = on => {
     if (!e.agentId) {
       tickTimer?.cancel()
       tickTimer = $.clock.every(1000, async () => {
-        if ((await $.clock.now()) >= logTyping.until) $.ui.invalidate('ui.render')
+        // EXPERIMENT (temporary): no per-second redraw, to see whether it makes the console scroll shiver
+        // if ((await $.clock.now()) >= logTyping.until) $.ui.invalidate('ui.render')
       })
       $.ui.invalidate('ui.render')
     }
