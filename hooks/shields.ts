@@ -25,6 +25,7 @@ export function parse(command: string): Parsed {
   let copied = 0
   let lineStart = 0
   let lineStartAt = 0
+  let braceDepth = 0
   let seg: string[] = []
   let word: string | null = null
   let i = 0
@@ -173,7 +174,11 @@ export function parse(command: string): Parsed {
       i++
       continue
     }
-    if (c === '#' && word === null) { while (i < command.length && command[i] !== '\n') i++; continue }
+    // Inside ${ … } a # is text, never a comment. Every unquoted { counts toward the depth, so a miscount
+    // only ever keeps a # from starting a comment (fail closed)
+    if (c === '$' && command[i + 1] === '{') { braceDepth++; add('${'); i += 2; continue }
+    if (braceDepth > 0 && (c === '{' || c === '}')) { braceDepth += c === '{' ? 1 : -1; add(c); i++; continue }
+    if (c === '#' && word === null && braceDepth === 0) { while (i < command.length && command[i] !== '\n') i++; continue }
     if (c === '\n') { endSeg(); i++; readBodies(); continue }
     if (';&|()'.includes(c)) { endSeg(); i++; continue }
     if (/\s/.test(c)) { endWord(); i++; continue }

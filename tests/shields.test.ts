@@ -33,7 +33,7 @@ test('shields catch destructive commands however they are written', async () => 
     'echo ${x:-<<E}\nrm -rf x\nE', 'echo "${x}" ${y:-<<E}\ngit reset --hard\nE',
     // a quoted brace can't end or stretch ${…}, and a line that could carry on has its body judged
     "echo ${x:-'{'}; rm -rf x", 'echo ${x:-"}"}; rm -rf x', 'echo ${x:-$(echo })}; rm -rf x',
-    "echo ${x:-$'\\''} <<E\nrm -rf x\nE", 'echo ${x:-{}} <<E\nrm -rf x\nE', "cat \\\n<<'E'\nrm -rf x\nE",
+    "echo ${x:-$'\\''} <<E\nrm -rf x\nE", 'echo ${x:- #}; rm -rf x', 'echo ${x:-${y:- #}}; rm -rf x', 'echo ${x:-{}} <<E\nrm -rf x\nE', "cat \\\n<<'E'\nrm -rf x\nE",
     "cat <<'E' | # note\nrm -rf x\nE\nbash", "cat <<'E' | {\nrm -rf x\nE\nbash; }", "{ cat <<'E'\nrm -rf x\nE\n} | bash",
     "cat <<'A' > a.md && cat <<'B' > b.md\ngit push -f\nA\nrm -rf ~\nB",
     // a << in arithmetic is a shift, not a here-document, so the next line is still judged
