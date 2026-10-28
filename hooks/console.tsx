@@ -181,6 +181,14 @@ function gist(text: string): string {
 export const logTyping = { until: 0 }
 const LOG_TYPING_HOLD = 15000
 
+// DEBUG-RENDER (temporary): one line per console draw, to find what redraws it while scrolling.
+// Render-only on purpose: a ui.scroll hook makes the pane shiver by itself
+const debugLines: string[] = []
+function debugRender($: EngineInterface, line: string) {
+  debugLines.push(`${new Date().toISOString().slice(11, 23)} ${line}`)
+  void $.fs.write('/Users/cap/MOD/.claude/render-debug.log', debugLines.slice(-600).join('\n') + '\n').catch(() => {})
+}
+
 export function registerConsole(on: On) {
   on('ui.focus', { requestId: CONSOLE_PANE }, async ($, e, next) => {
     logTyping.until = e.element?.startsWith('log-') ? (await $.clock.now()) + LOG_TYPING_HOLD : 0
@@ -213,6 +221,7 @@ export function registerConsole(on: On) {
   })
 
   on('ui.render', { component: 'Pane', requestId: CONSOLE_PANE }, async ($, e) => {
+    debugRender($, `render offset=${e.props.scroll?.offset} rows=${e.props.scroll?.bodyRows} working=${(await read($, activity)).turnStartedAt !== null}`)
     await loadPrefs($)
     const el = $.ui.resolve(e)
     const { Box, Text, Button } = el

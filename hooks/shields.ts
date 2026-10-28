@@ -70,23 +70,6 @@ export function parse(command: string): Parsed {
     return undefined
   }
 
-  // From just inside ${, the index of its closing brace: a brace inside quotes or a nested command
-  // doesn't count. None on the same line is -1, and ${ is then read as plain characters (fail closed)
-  const closeBrace = (from: number) => {
-    for (let j = from, depth = 1; j < command.length; j++) {
-      const ch = command[j]
-      if (ch === '\n') return -1
-      if (ch === '\\') { j++; continue }
-      if (ch === "'") { j = command.indexOf("'", j + 1); if (j < 0) return -1; continue }
-      if (ch === '"') { j = skipDouble(j); continue }
-      if (ch === '`') { j = command.indexOf('`', j + 1); if (j < 0) return -1; continue }
-      if (ch === '$' && command[j + 1] === '(') { j = closeParen(j + 1); continue }
-      if (ch === '{') depth++
-      if (ch === '}' && --depth === 0) return j
-    }
-    return -1
-  }
-
   // The delimiter word after << (or <<-) at `from`: quotes and escapes are taken off, and any of them
   // makes it a quoted delimiter
   const delimiter = (from: number) => {
@@ -117,9 +100,10 @@ export function parse(command: string): Parsed {
   // delimiter line. An unquoted body still runs its $(…) and `…`, so those are collected
   const readBodies = () => {
     const line = segments.slice(lineStart)
-    // Only text when the line is one plain command a text reader runs: no pipe, list, group, comment
-    // or nested command anywhere on it, so nothing can carry the body on to something that runs it
-    const isText = line.length === 1 && !/[|&;(){}#`]/.test(command.slice(lineStartAt, i - 1))
+    // Only text when the line is one plain command a text reader runs: no pipe, list, group, comment,
+    // expansion, arithmetic or escape anywhere on it. A << Shields might misread (one inside ${…} or
+    // (( … ))) then just means the lines after it are judged, never skipped
+    const isText = line.length === 1 && !/[|&;(){}\[\]#`$\\]/.test(command.slice(lineStartAt, i - 1))
       && TEXT_READERS.has(nameOf(line[0]!.find(w => !ASSIGNMENT.test(w)) ?? ''))
     for (const doc of pending.splice(0)) {
       const start = i
@@ -165,40 +149,6 @@ export function parse(command: string): Parsed {
       const end = command.indexOf("'", i + 1)
       add(command.slice(i + 1, end < 0 ? undefined : end))
       i = end < 0 ? command.length : end + 1
-      continue
-    }
-    // ${ … } is one word, kept as written: a << in it is never a here-document. Any $(…) or `…` inside
-    // still runs, so those are collected
-    if (c === '$' && command[i + 1] === '{' && closeBrace(i + 2) >= 0) {
-      const end = closeBrace(i + 2)
-      const saved = word
-      for (let j = i + 2; j < end; j++) {
-        if (command[j] === '\\') { j++; continue }
-        const after = substitution(j)
-        if (after !== undefined) j = after - 1
-      }
-      word = saved
-      add(command.slice(i, end + 1))
-      i = end + 1
-      continue
-    }
-    // Arithmetic, (( … )) or $[ … ], is one word: a << in it is a shift, never a here-document. Any
-    // $(…) or `…` inside still runs, so those are collected
-    if ((c === '(' && command[i + 1] === '(') || (c === '$' && command[i + 1] === '[')) {
-      let end = c === '(' ? closeParen(i) : command.indexOf(']', i + 2)
-      if (end < 0) end = command.length
-      const saved = word
-      for (let j = i + 2; j < end; j++) {
-        if (command[j] === '\\') { j++; continue }
-        const after = substitution(j)
-        if (after !== undefined) j = after - 1
-      }
-      word = saved
-      // bash rereads a (( that isn't arithmetic as two subshells, so the inside is judged as commands too
-      if (c === '(') nested.push(command.slice(i + 1, end))
-      endWord()
-      add('((…))')
-      i = end + 1
       continue
     }
     // << starts a here-document (<<< is a here-string, an ordinary word)
