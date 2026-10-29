@@ -781,6 +781,28 @@ test('Claude adds a folder the mod has never seen only after the captain says so
   for (const argv of gits) expect(argv.slice(0, 3)).toEqual(['git', '-c', 'core.fsmonitor=false'])
 })
 
+test('with no hub yet, Set up my hub has Claude publish one once, and the button goes when the hub is set', async ($, on) => {
+  const store = engine(on)
+  const sent: string[] = []
+  on('prompt.submit', (_: unknown, e: { text: string }) => { sent.push(e.text); return { text: e.text } })
+  on('tool.call', () => ({ result: 'ok' }))
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
+  await ui.press({ key: 'setup-hub' })
+  expect(sent.length).toBe(1)
+  expect(sent[0]).toContain('assets/hub.html')
+  expect(sent[0]).toContain('starfleet_set_hub')
+  // A second press while Claude works on it publishes nothing more
+  await ui.press({ key: 'setup-hub' })
+  expect(sent.length).toBe(1)
+  expect((await ui.find({ type: 'Button', key: 'setup-hub' }))?.props.label).toBe('Setting up your hub…')
+  // Once the hub is saved, the button is gone
+  await callTool($, { tool: 'mcp__starfleet__starfleet_set_hub', url: 'https://claude.ai/artifact/hub1' })
+  expect(store.hubUrl).toBe('https://claude.ai/artifact/hub1')
+  expect(await ui.find({ type: 'Button', key: 'setup-hub' })).toBeFalsy()
+  await ui.unmount()
+})
+
 test('an added folder that no longer exists leaves its crew slot free', async ($, on) => {
   const dir = (name: string) => ({ name, kind: 'dir', size: 0, mtimeMs: Date.now(), isLink: false })
   const store = engine(on, undefined, undefined, {

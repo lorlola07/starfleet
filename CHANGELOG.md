@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.12
+
+### Added
+- **Set up my hub:** with no hub yet, the console's Captain's log block shows a button that has Claude publish your own private hub right away, instead of waiting for your first Close mission. Pressing it twice never makes two hubs, and the button goes once the hub is set.
+
 ## 0.4.11
 
 ### Fixed

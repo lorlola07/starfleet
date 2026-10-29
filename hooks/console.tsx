@@ -5,7 +5,7 @@ import { buildBriefing, currentBriefing, dismissBriefing } from './briefing'
 import { TIER_TEXT, coreFlags, coreSvg, ejectCore, tierOf } from './core'
 import { openAbout } from './about'
 import { DECKS, DECK_H, crewNow, crewSvg, openManageCrew, scanCrew } from './crew'
-import { loadLogDraft, openLog, readLog, sendClosure } from './log'
+import { hubUrl, isSettingUpHub, loadLogDraft, openLog, readLog, sendClosure, setUpHub } from './log'
 import { isAiOn, setAi, isBandOn, setBand } from './prefs'
 import { redAlertSvg, toggleRedAlert } from './ops'
 import { BADGE_H, BADGE_W, RANKS, SPRITES, SPRITE_COLORS, basename, pipsSvg, rankBadgeSvg, rankOf, stardate } from './shared'
@@ -428,6 +428,9 @@ export function registerConsole(on: On) {
     // lives in that tab: a field here gives the console the keys, and the app then fights every
     // scroll (the focus shiver) ──
     const log = await readLog($)
+    // With no hub yet, a button to set one up now, so a new captain doesn't have to find Close mission
+    const hasHub = (await hubUrl($)) !== undefined
+    const isSettingUp = !hasHub && (await isSettingUpHub($))
     const logButton = (
       <Box flexDirection="column" rowGap={1}>
         {head('CAPTAIN’S LOG', log.length ? `${log.length} entries` : '', 'b-log')}
@@ -436,6 +439,8 @@ export function registerConsole(on: On) {
               ignores a text color set on them, so black text on a lilac pill never showed */}
           <Button key="open-log" label="Captain’s log" variant="primary" onPress={() => pressed($, () => openLog($))} />
           <Text dimColor>or type /log and a note in the prompt box</Text>
+          {!hasHub && <Button key="setup-hub" label={isSettingUp ? 'Setting up your hub…' : 'Set up my hub'} plain onPress={() => pressed($, () => setUpHub($))} />}
+          {!hasHub && <Text dimColor>Your own private claude.ai page for notes, crew and missions</Text>}
         </Box>
       </Box>
     )

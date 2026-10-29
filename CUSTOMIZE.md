@@ -93,7 +93,7 @@ One set of colors runs the whole console.
 
 ### 13. Starfleet Command hub
 Your private page for the log, crew and mission history.
-- **Kind:** a web page. **Where:** `assets/hub.html`. Your copy is published from it the first time you press Close mission.
+- **Kind:** a web page. **Where:** `assets/hub.html`. Your copy is published from it when you press Set up my hub, or your first Close mission.
 - **Try:** "In assets/hub.html, add a search box that filters log notes." Then republish your hub, or start a new one with `/hub clear` and Close mission.
 - **Good to know:** your notes live in the hub's own storage, not in the page, so changing the page never loses them.
 

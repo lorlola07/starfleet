@@ -183,7 +183,7 @@ export async function sendEntryToHub($: EngineInterface, entry: LogEntry) {
   const doc = { stardate: entry.stardate, text: entry.text, at: entry.at, project: entry.project, category: entry.category, session: await $.session.id() }
   if (!hub) {
     await pendingLock(async () => $.store.set('hubPending', [...(await readPending($)).filter(p => p.id !== entry.id), { id: entry.id, doc }].slice(-PENDING_MAX)))
-    $.ui.toast('📓 Logged. It goes to your hub once you have one (Close mission sets it up).')
+    $.ui.toast('📓 Logged. It goes to your hub once you have one: press Set up my hub in the console.')
     return
   }
   if (await writeHub($, hub, [{ op: 'set', collection: 'log', doc_id: entry.id, data: doc }], 'The user pressed Record on the captain\'s log to save this note to their Starfleet Command hub.')) return
@@ -327,6 +327,32 @@ export async function setHubUrl($: EngineInterface, url: string | undefined) {
   else await $.store.delete('hubUrl')
 }
 
+// The console's Set up my hub button: Claude publishes the captain's own hub from the template now,
+// instead of waiting for the first Close mission. Pressed again before the link arrives, it waits
+// rather than publishing a second hub
+let hubSetupAt: number | undefined
+const HUB_SETUP_WAIT = 2 * 60 * 1000
+export async function isSettingUpHub($: EngineInterface): Promise<boolean> {
+  return hubSetupAt !== undefined && (await $.clock.now()) - hubSetupAt < HUB_SETUP_WAIT
+}
+
+export async function setUpHub($: EngineInterface) {
+  if (await hubUrl($)) return
+  if (await isSettingUpHub($)) {
+    $.ui.toast('🖖 Your hub is on its way. Give Claude a moment.')
+    return
+  }
+  hubSetupAt = await $.clock.now()
+  void $.prompt.submit({ text: [
+    'The captain pressed Set up my hub. Publish their Starfleet Command hub:',
+    `- Publish the file ${$.plugin.root}/${HUB_TEMPLATE} as a new private Artifact, as it is (no redesign), with icon "star" and the capabilities assets, db and downloads, each {}.`,
+    '- Call the starfleet_set_hub tool with the new artifact\'s URL, and do what its answer says.',
+    'Touch nothing else. Reply in one short line with the hub\'s link.',
+  ].join('\n') }).catch(() => { hubSetupAt = undefined })
+  $.ui.toast('🖖 Setting up your Starfleet Command hub…')
+  $.ui.invalidate('ui.render')
+}
+
 // How a sync prompt opens: the saved hub, or steps that publish the captain's own hub first
 async function hubOpening($: EngineInterface, what: string): Promise<string[]> {
   const hub = await hubUrl($)
@@ -448,7 +474,7 @@ export function registerLog(on: On) {
     const arg = e.args.trim()
     if (arg === 'clear') {
       await setHubUrl($, undefined)
-      return { text: 'Hub forgotten. Your next Close mission publishes a new one. Notes you Record are held for it until then.' }
+      return { text: 'Hub forgotten. Press Set up my hub in the console, or Close mission, to publish a new one. Notes you Record are held for it until then.' }
     }
     if (arg) {
       if (!isHubUrl(arg)) return { text: 'That is not a claude.ai artifact link. Use /hub https://claude.ai/artifact/…' }
@@ -458,7 +484,7 @@ export function registerLog(on: On) {
       return { text: `Starfleet Command hub set: ${arg}` }
     }
     const hub = await hubUrl($)
-    return { text: hub ? `Starfleet Command hub: ${hub}` : 'No hub yet. Press Close mission in the /starfleet console and Claude publishes your own.' }
+    return { text: hub ? `Starfleet Command hub: ${hub}` : 'No hub yet. Press Set up my hub in the /starfleet console and Claude publishes your own.' }
   })
 
   on('command.run', { command: 'closure' }, async $ => {
