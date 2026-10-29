@@ -2,7 +2,8 @@ import type { EngineInterface, On } from 'claude-code'
 
 import type { CrewMember, LogEntry, Mission } from '../types'
 import { scanCrew } from './crew'
-import { HUB_TEMPLATE, basename, isHubUrl, serial, stardate } from './shared'
+import { HUB_TEMPLATE, LOG_CATEGORIES, SPRITES, basename, categoryOf, isHubUrl, projectOf, serial, splitCategory, stardate } from './shared'
+import type { LogCategory } from './shared'
 import { HEAD_COLOR, LCARS } from './theme'
 import { readVoyage } from './voyage'
 
@@ -18,7 +19,39 @@ const ARCHIVE_MAX = 1000
 // coreAlert:<id>, logDraft:<id>
 const PER_SESSION = /^(log|missions|voyage|lastPrompt|briefing|coreAlert|logDraft):(.+)$/
 
+// The log field lives in this tab, not the console: typing in a console field gives the console the
+// keys, and the app then pulls it back to the field on every scroll (the focus shiver).
+// The unrecorded draft is kept per chat, so a reload doesn't lose it; a /clear starts clean
 let draftKey = 0
+let startDraft = ''
+// The category the next entry is filed under (back to note after each Record), and which category
+// sections of the list are folded, kept across chats (store key logFolded)
+let picked: LogCategory = 'note'
+let folded: Partial<Record<LogCategory, boolean>> | undefined
+// The most entries a section lists; the rest are on the hub
+const SECTION_MAX = 10
+let draftLoadedFor: string | undefined
+
+// While the captain is typing in the log field, the once-a-second tick holds off: on the desktop each
+// redraw blinks the field's focus ring. Until this time (clock ms); focus or a keystroke there extends it
+export const logTyping = { until: 0 }
+const LOG_TYPING_HOLD = 15000
+
+export async function loadLogDraft($: EngineInterface) {
+  const id = await $.session.id()
+  if (draftLoadedFor === id) return
+  const isNewChat = draftLoadedFor !== undefined
+  draftLoadedFor = id
+  const draft = await $.store.get(`logDraft:${id}`)
+  startDraft = typeof draft === 'string' ? draft : ''
+  if (isNewChat) draftKey += 1
+}
+
+// The console's Captain's log button and /log alone both open the tab, with the field focused
+export async function openLog($: EngineInterface) {
+  await loadLogDraft($)
+  return $.ui.open({ id: LOG_PANE, title: '📓 Captain’s log', focus: true, closeOnEscape: true })
+}
 
 
 async function logKey($: EngineInterface) {
@@ -82,6 +115,7 @@ function parseLog(saved: unknown): LogEntry[] {
     text: e.text ?? '',
     at: e.at ?? 0,
     project: e.project ?? '',
+    category: categoryOf(e.category).id,
   }))
 }
 
@@ -106,11 +140,22 @@ async function takePending($: EngineInterface): Promise<string | undefined> {
   return `Also add the captain's log entries recorded before the hub existed: with ArtifactData in one batch, set each in collection "log" (doc id = its id, data = its doc): ${JSON.stringify(pending)}`
 }
 
+type ArtifactDataOut = { deny?: unknown; isError?: boolean; text?: string }
+
+// Every hub read and write goes through this one ArtifactData call. Inferring $.tool.call's input
+// across every tool the engine knows is too deep for tsc (TS2589, at whichever call comes first);
+// the loader needs $.tool.call spelled at the call site, so it can't be wrapped in a cast, and the
+// one ignore below covers the one call instead
+async function artifactData($: EngineInterface, input: Record<string, unknown>): Promise<ArtifactDataOut> {
+  // @ts-ignore TS2589: type instantiation too deep, see above
+  return (await $.tool.call({ tool: 'ArtifactData', ...input } as never)) as unknown as ArtifactDataOut
+}
+
 // Write the hub's database straight through the ArtifactData tool, with no chat turn. False when the
 // tool is missing, refused or errors, so the caller can fall back to asking Claude
 async function writeHub($: EngineInterface, hub: string, writes: Record<string, unknown>[], consent: string): Promise<boolean> {
   try {
-    const out = await $.tool.call({ tool: 'ArtifactData', action: 'batch', url: hub, writes, consent } as never) as { deny?: unknown; isError?: boolean; text?: string }
+    const out = await artifactData($, { action: 'batch', url: hub, writes, consent })
     if (!out.deny && !out.isError) return true
     await $.store.set('hubWriteError', { at: await $.clock.now(), deny: String(out.deny ?? ''), text: String(out.text ?? '').slice(0, 500) })
     return false
@@ -123,7 +168,7 @@ async function writeHub($: EngineInterface, hub: string, writes: Record<string, 
 // A hub doc's current version, or undefined when it isn't there or can't be read
 async function hubVersion($: EngineInterface, hub: string, collection: string, id: string): Promise<number | undefined> {
   try {
-    const out = await $.tool.call({ tool: 'ArtifactData', action: 'get', url: hub, collection, doc_id: id } as never) as { text?: string; isError?: boolean }
+    const out = await artifactData($, { action: 'get', url: hub, collection, doc_id: id })
     const match = !out.isError && out.text?.match(/"version":(\d+)/)
     return match ? Number(match[1]) : undefined
   } catch {
@@ -135,7 +180,7 @@ async function hubVersion($: EngineInterface, hub: string, collection: string, i
 // only if that fails. With no hub yet it is held, and goes when the hub is set
 export async function sendEntryToHub($: EngineInterface, entry: LogEntry) {
   const hub = await hubUrl($)
-  const doc = { stardate: entry.stardate, text: entry.text, at: entry.at, project: entry.project, session: await $.session.id() }
+  const doc = { stardate: entry.stardate, text: entry.text, at: entry.at, project: entry.project, category: entry.category, session: await $.session.id() }
   if (!hub) {
     await pendingLock(async () => $.store.set('hubPending', [...(await readPending($)).filter(p => p.id !== entry.id), { id: entry.id, doc }].slice(-PENDING_MAX)))
     $.ui.toast('📓 Logged. It goes to your hub once you have one (Close mission sets it up).')
@@ -149,26 +194,22 @@ export async function sendEntryToHub($: EngineInterface, entry: LogEntry) {
   ].join('\n') }).catch(() => {})
 }
 
-export async function addLogEntry($: EngineInterface, text: string): Promise<LogEntry> {
+export async function addLogEntry($: EngineInterface, text: string, category: LogCategory = 'note'): Promise<LogEntry> {
   const now = await $.clock.now()
   // Track on every write too: after /clear the id changes with no session.start
   await trackSession($)
-  const entry: LogEntry = { id: `log-${now}-${Math.random().toString(36).slice(2, 6)}`, stardate: stardate(now), text, at: now, project: basename(await $.session.cwd()) }
+  const entry: LogEntry = { id: `log-${now}-${Math.random().toString(36).slice(2, 6)}`, stardate: stardate(now), text, at: now, project: basename(await $.session.cwd()), category }
   await $.store.set(await logKey($), [entry, ...(await readLog($))].slice(0, 500))
   $.ui.invalidate('ui.render')
   return entry
 }
 
-// Ask first, naming the entry, with Keep as the default answer
-async function confirmDeleteEntry($: EngineInterface, entry: LogEntry) {
-  const gist = entry.text.length > 40 ? entry.text.slice(0, 39) + '…' : entry.text
-  let answer: string | undefined
-  try {
-    answer = await $.ui.ask(`Delete the log entry "${gist}"?`, { header: 'Log', options: ['Keep', 'Delete entry'] })
-  } catch {
-    return // dismissed: nothing changes
-  }
-  if (answer === 'Delete entry') await deleteLogEntry($, entry.id)
+// The entry whose Delete was pressed, asking inline (Keep first, the safe answer) before anything
+// goes. Not the app's question box: on desktop it can open unseen and leave the chat spinning
+let confirmingDelete: string | undefined
+
+function gistOf(entry: LogEntry): string {
+  return entry.text.length > 40 ? entry.text.slice(0, 39) + '…' : entry.text
 }
 
 // Delete here and on the hub: logDeleted keeps later syncs from bringing it back
@@ -302,16 +343,15 @@ export async function syncPrompt($: EngineInterface): Promise<string> {
   return [
     ...(await hubOpening($, 'Sync the Starfleet Command hub artifact')),
     'Call the starfleet_records tool, then write its rows to the artifact database with ArtifactData in one batch:',
-    '- collection "log": one doc per entry, doc id = entry id, fields { stardate, text, at, project }. First list collection "logDeleted": skip every entry whose id is a doc there (the captain deleted it in the hub)',
-    '- collection "crew": one doc per crew member, doc id = the sprite key, fields { name, sprite, project, deck, status, order } where order is its position in the list',
-    '- collection "missions": one doc per mission, doc id = mission id, with every field of the mission record as given (stardate, at, endedAt, project, cwd, turns, redAlerts, handoffs, models, warpCore, plugins, mcpServers, skills, agents, tools, files) plus three you write from this conversation:',
+    '- collection "log": one doc per entry, doc id = entry id, fields { stardate, text, at, project, category }. First list collection "logDeleted": skip every entry whose id is a doc there (the captain deleted it in the hub)',
+    '- collection "missions": one doc per mission, doc id = mission id, with every field of the mission record as given (stardate, at, endedAt, project, cwd, sprite, tag, crewName, turns, redAlerts, handoffs, models, warpCore, plugins, mcpServers, skills, agents, tools, files) plus three you write from this conversation:',
     '  summary: one line naming what the mission did, like "Built a clickable mission record for the hub"',
     '  report: 2 to 4 sentences on the project, the goal and how it ended (what works now, what is left)',
     '  steps: an array of 3 to 8 short strings, the steps taken in order',
     'Before writing a missions doc, read the existing one. If it has editedAt, the captain edited it by hand in the hub: write it with "update", not "set", and leave its summary, report, steps and editedAt as they are.',
     'For the mission\'s moments (screenshots, each with a local path): first read the existing missions doc; a moment whose path already has an entry there keeps its url. Upload each new one with the Artifact tool (publish, url = the hub, asset: true, file_paths = the new paths) and store moments as [{ at, caption, source, path, url }] in the order given. Never upload anything that is not in the moments list.',
     'Skip any mission whose id is a doc in collection "missionDeleted" (the captain deleted it in the hub). Write closed: true on every missions doc, and keep any closure and closedAt already on it.',
-    'Add a field session = the records\' sessionId to every log and missions doc. Delete only log and missions docs whose session is that sessionId and whose ids are no longer in the records; leave other sessions\' docs alone. Delete crew docs whose ids are no longer in the records. Reply in one line with what was synced.',
+    'Add a field session = the records\' sessionId to every log and missions doc. Delete only log and missions docs whose session is that sessionId and whose ids are no longer in the records; leave other sessions\' docs alone. Touch no other collection. Reply in one line with what was synced.',
   ].join('\n')
 }
 
@@ -332,52 +372,9 @@ export async function closurePrompt($: EngineInterface, now: number): Promise<st
   ].join('\n')
 }
 
-// The crew alone, sent after a rescan
-// The ids and versions of every doc in one hub collection, or undefined when it can't be read
-async function hubDocs($: EngineInterface, hub: string, collection: string): Promise<Map<string, number> | undefined> {
-  try {
-    const out = await $.tool.call({ tool: 'ArtifactData', action: 'list', url: hub, collection, query: { limit: 100 } } as never) as { text?: string; isError?: boolean }
-    if (out.isError || out.text === undefined) return undefined
-    const docs = new Map<string, number>()
-    for (const m of out.text.matchAll(/\{"id":"([^"]+)".*?"version":(\d+)/g)) docs.set(m[1]!, Number(m[2]))
-    return docs
-  } catch {
-    return undefined
-  }
-}
-
-// Sync the crew roster to the hub straight through the ArtifactData tool, with no chat turn, the
-// way captain's log entries go. False when it can't (no hub, no crew, a refused or failed call), so
-// the caller can fall back to asking Claude
-export async function syncCrewToHub($: EngineInterface): Promise<boolean> {
-  const hub = await hubUrl($)
-  if (!hub) return false
-  // The sync deletes hub crew missing from the roster, so never sync an unscanned, empty one
-  const crew = ((await $.store.get('crew')) ?? []) as CrewMember[]
-  if (!crew.length) return false
-  const existing = await hubDocs($, hub, 'crew')
-  if (!existing) return false
-  const pin = (id: string) => (existing.has(id) ? { if_version: existing.get(id) } : {})
-  const writes: Record<string, unknown>[] = crew.map((c, order) => ({
-    op: 'set', collection: 'crew', doc_id: c.sprite, ...pin(c.sprite),
-    data: { name: c.name, sprite: c.sprite, project: c.project, deck: c.deck, status: c.status, order },
-  }))
-  const aboard = new Set(crew.map(c => c.sprite))
-  for (const id of existing.keys()) if (!aboard.has(id)) writes.push({ op: 'delete', collection: 'crew', doc_id: id, ...pin(id) })
-  return writeHub($, hub, writes, 'The user pressed Rescan + sync crew on the Starfleet console to update the crew roster on their Starfleet Command hub.')
-}
-
-export async function crewSyncPrompt($: EngineInterface): Promise<string> {
-  return [
-    ...(await hubOpening($, 'Sync the crew roster to the Starfleet Command hub artifact')),
-    'Call the starfleet_records tool, then with ArtifactData in one batch write collection "crew": one doc per crew member, doc id = the sprite key, fields { name, sprite, project, deck, status, order } where order is its position in the list.',
-    'Delete crew docs whose ids are no longer in the records. Touch no other collection. Reply in one line naming who is aboard.',
-  ].join('\n')
-}
-
 // Answered by register.tsx's hook on mcp__starfleet__starfleet_records
 export async function recordsJson($: EngineInterface): Promise<string> {
-  // The sync deletes hub crew missing from these records, so never hand over an unscanned, empty roster
+  // Scan first when nothing is stored, so the records never hand over an empty roster
   let crew = ((await $.store.get('crew')) ?? []) as CrewMember[]
   if (!crew.length) {
     await scanCrew($).catch(() => {})
@@ -389,8 +386,15 @@ export async function recordsJson($: EngineInterface): Promise<string> {
 // This session's missions with the voyage folded in: the warp core report and the files changed
 async function missionRecords($: EngineInterface) {
   const v = await readVoyage($)
+  // Each mission's project and its crew member at the time, so the hub's report shows who served
+  const assigned = ((await $.store.get('crewAssign')) ?? {}) as Record<string, string>
+  const crewOf = (m: Mission) => {
+    const sprite = assigned[projectOf(m.cwd) ?? '']
+    return sprite && SPRITES[sprite] ? { sprite, tag: SPRITES[sprite]!.emoji, crewName: SPRITES[sprite]!.name } : {}
+  }
   return Promise.all((await readMissions($)).map(async m => ({
     ...m,
+    ...crewOf(m),
     ...pluginsOf(m),
     warpCore: { warpMs: v.warpMs, orders: v.orders, scans: v.scans, greenBuilds: v.greenBuilds, commits: v.commits, lastBuild: v.lastBuild, peakContext: m.peakContext ?? null, onDutyMs: (m.endedAt ?? m.at) - Math.min(m.at, v.startedAt) },
     files: v.files,
@@ -415,8 +419,8 @@ async function momentsOf($: EngineInterface, m: Mission) {
 
 export async function logSessionStart($: EngineInterface) {
   await trackSession($)
-  await $.command.register({ name: 'closure', description: 'Close this mission: write a closure report to the Starfleet Command hub so the chat can be archived', immediate: true })
-  await $.command.register({ name: 'log', description: 'Captain’s log: /log <note> captures it now; /log alone opens the log', immediate: true, argumentHint: '<note>' })
+  await $.command.register({ name: 'closure', description: 'Close this mission: write a closure report to the Starfleet Command hub so the chat can be archived', immediate: true }).catch(() => {})
+  await $.command.register({ name: 'log', description: 'Captain’s log: /log <note> captures it now (/log idea: …, bug:, decision:, todo: file it under that category); /log alone opens the log', immediate: true, argumentHint: '[idea|bug|decision|todo:] <note>' }).catch(() => {})
   await $.tool.register({
     name: 'starfleet_records',
     description: 'Read the captain’s Starfleet records kept by the starfleet mod: this session’s captain’s log entries and mission, the crew roster (their code projects), mission history, and the hub artifact URL. Use when asked about the captain’s log, notes, crew, missions, or to sync the hub.',
@@ -427,7 +431,7 @@ export async function logSessionStart($: EngineInterface) {
     description: 'Save the URL of the captain’s Starfleet Command hub artifact (a claude.ai artifact link), so later syncs write to it. Call it right after publishing the hub during a sync.',
     inputSchema: { type: 'object', properties: { url: { type: 'string', description: 'The hub artifact’s claude.ai URL' } }, required: ['url'] },
   })
-  await $.command.register({ name: 'hub', description: 'Starfleet Command hub: /hub shows its link, /hub <url> sets it, /hub clear forgets it', immediate: true, argumentHint: '<url> | clear' })
+  await $.command.register({ name: 'hub', description: 'Starfleet Command hub: /hub shows its link, /hub <url> sets it, /hub clear forgets it', immediate: true, argumentHint: '<url> | clear' }).catch(() => {})
 }
 
 export function registerLog(on: On) {
@@ -463,55 +467,118 @@ export function registerLog(on: On) {
   })
 
   on('command.run', { command: 'log' }, async ($, e) => {
-    const text = e.args.trim()
+    const { category, text } = splitCategory(e.args)
     if (text) {
-      const entry = await addLogEntry($, text)
-      $.ui.toast(`📓 Logged at stardate ${entry.stardate}`)
+      const entry = await addLogEntry($, text, category)
+      $.ui.toast(`${categoryOf(category).emoji} ${categoryOf(category).label} logged at stardate ${entry.stardate}`)
       await sendEntryToHub($, entry)
       return {}
     }
-    const opened = await $.ui.open({ id: LOG_PANE, title: '📓 Captain’s log', focus: true, closeOnEscape: true })
+    const opened = await openLog($)
     return opened.isPlaced ? {} : { text: `Log pane not shown: ${opened.reason}` }
+  })
+
+  on('ui.focus', { requestId: LOG_PANE }, async ($, e, next) => {
+    logTyping.until = e.element?.startsWith('log-') ? (await $.clock.now()) + LOG_TYPING_HOLD : 0
+    return next(e)
   })
 
   on('ui.render', { component: 'Pane', requestId: LOG_PANE }, async ($, e) => {
     const el = $.ui.resolve(e)
     const { Box, Text, Button, Link } = el
-    const log = await readLog($)
+    await loadLogDraft($)
+    if (folded === undefined) {
+      const saved = await $.store.get('logFolded')
+      folded = saved && typeof saved === 'object' ? (saved as Partial<Record<LogCategory, boolean>>) : {}
+    }
+    const all = await readLog($)
     const hub = await hubUrl($)
+    const fold = async (id: LogCategory) => {
+      folded = { ...folded, [id]: !folded?.[id] }
+      await $.store.set('logFolded', folded)
+      $.ui.invalidate('ui.render')
+    }
+    const entryRow = (entry: LogEntry) => confirmingDelete === entry.id ? (
+      <Box key={'row-' + entry.id} flexDirection="row" columnGap={1} flexWrap="wrap">
+        <Text bold>Delete the log entry "{gistOf(entry)}"?</Text>
+        <Button key={'keep-' + entry.id} label="Keep" plain onPress={() => {
+          confirmingDelete = undefined
+          $.ui.invalidate('ui.render')
+        }} />
+        <Button key={'confirm-del-' + entry.id} label="Delete entry" plain onPress={async () => {
+          confirmingDelete = undefined
+          await deleteLogEntry($, entry.id)
+        }} />
+      </Box>
+    ) : (
+      <Box key={'row-' + entry.id} flexDirection="row" columnGap={1}>
+        <Button key={'del-' + entry.id} label="Delete" plain dimColor onPress={() => {
+          confirmingDelete = entry.id
+          $.ui.invalidate('ui.render')
+        }} />
+        <Text color={LCARS.peach}>{entry.stardate}</Text>
+        <Text>{entry.text}</Text>
+        {entry.project && <Text dimColor>· {entry.project}</Text>}
+      </Box>
+    )
     return (
       <Box flexDirection="column" rowGap={1} padding="sm">
         <Box flexDirection="row" columnGap={1}>
           <Text backgroundColor={HEAD_COLOR} color={LCARS.ink} bold> CAPTAIN’S LOG </Text>
           <Text color={LCARS.lilac}>Stardate {stardate(await $.clock.now())}</Text>
         </Box>
+        {/* The category the next entry is filed under: one press, the picked one filled in */}
+        <Box flexDirection="row" columnGap={1} flexWrap="wrap" alignItems="center">
+          <Text dimColor>File as</Text>
+          {LOG_CATEGORIES.map(c => (
+            <Button key={'cat-' + c.id} label={`${c.emoji} ${c.label}`} {...(picked === c.id ? { variant: 'primary' as const } : { plain: true as const })} onPress={() => {
+              picked = c.id
+              $.ui.invalidate('ui.render')
+            }} />
+          ))}
+        </Box>
         {'Input' in el && (
           <el.Input
-            key={'entry-' + draftKey}
+            key={'log-' + draftKey}
             label="Log"
-            value=""
+            value={startDraft}
             submitLabel="Record"
             autoFocus
+            onInput={value => {
+              void $.clock.now().then(now => { logTyping.until = now + LOG_TYPING_HOLD }).catch(() => {})
+              void $.session.id().then(id => $.store.set(`logDraft:${id}`, value)).catch(() => {})
+            }}
             onSubmit={async value => {
               if (!value.trim()) return
-              await sendEntryToHub($, await addLogEntry($, value.trim()))
+              const entry = await addLogEntry($, value.trim(), picked)
+              $.ui.toast(`${categoryOf(picked).emoji} ${categoryOf(picked).label} logged at stardate ${entry.stardate}`)
+              picked = 'note'
+              startDraft = ''
               draftKey += 1
+              logTyping.until = 0
+              await $.session.id().then(id => $.store.delete(`logDraft:${id}`)).catch(() => {})
               $.ui.invalidate('ui.render')
+              await sendEntryToHub($, entry)
             }}
           />
         )}
-        <Box flexDirection="column">
-          {log.length === 0 && <Text dimColor>No entries yet. Tip: type /log and a note at the prompt, from anywhere.</Text>}
-          {log.slice(0, 12).map(entry => (
-            <Box flexDirection="row" columnGap={1}>
-              <Button key={'del-' + entry.id} label="Delete" plain dimColor onPress={() => confirmDeleteEntry($, entry)} />
-              <Text color={LCARS.peach}>{entry.stardate}</Text>
-              <Text>{entry.text}</Text>
-              {entry.project && <Text dimColor>· {entry.project}</Text>}
+        {all.length === 0 && <Text dimColor>No entries yet. Tip: type /log and a note at the prompt, from anywhere. Start it with idea:, bug:, decision: or todo: to file it under that category.</Text>}
+        {/* One section per category that has entries, newest first inside; its header folds it */}
+        {LOG_CATEGORIES.map(c => {
+          const entries = all.filter(entry => entry.category === c.id)
+          if (entries.length === 0) return null
+          const isOpen = !folded?.[c.id]
+          return (
+            <Box key={'log-sec-' + c.id} flexDirection="column">
+              <Button key={'log-sec-' + c.id} label={`${c.label} (${entries.length})`} plain onPress={() => fold(c.id)}>
+                <Text color={c.color} bold>{isOpen ? '▾' : '▸'} {c.emoji} {c.label.toUpperCase()}</Text>
+                <Text dimColor> {entries.length}</Text>
+              </Button>
+              {isOpen && entries.slice(0, SECTION_MAX).map(entryRow)}
+              {isOpen && entries.length > SECTION_MAX && <Text dimColor>…and {entries.length - SECTION_MAX} more in the hub</Text>}
             </Box>
-          ))}
-          {log.length > 12 && <Text dimColor>…and {log.length - 12} more in the hub</Text>}
-        </Box>
+          )
+        })}
         {hub ? <Link href={hub} label="Open Starfleet Command →" /> : <Text dimColor>No hub yet. Close mission in the console publishes your own Starfleet Command hub.</Text>}
       </Box>
     )

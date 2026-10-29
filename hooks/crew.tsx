@@ -1,9 +1,17 @@
 import { atom, read } from 'claude-code'
-import type { EngineInterface, On } from 'claude-code'
+import type { EngineInterface, On, RenderElement } from 'claude-code'
 
 import type { CrewMember, Deck } from '../types'
-import { CREW_PALETTE, SPRITES, SPRITE_ORDER, basename, errText, pixels, projectOf, serial, taggedTitle, untaggedTitle } from './shared'
-import { FILL_WIDTH, HEAD_COLOR, LCARS } from './theme'
+import { CREW_MAX, CREW_PALETTE, RETIRED_SPRITES, SPRITES, SPRITE_ORDER, basename, errText, pixels, projectOf, serial, taggedTitle, untaggedTitle } from './shared'
+import { FILL_WIDTH, HEAD_COLOR, LCARS, chirp } from './theme'
+
+// Rescan the crew. The hub keeps no roster: each mission report there carries its crew member
+async function rescan($: EngineInterface) {
+  void chirp($)
+  await scanCrew($)
+  $.ui.invalidate('ui.render')
+  $.ui.toast('📡 Crew rescanned.')
+}
 
 // Your code projects as an 8-bit crew. Each stands on the deck that matches its state, and
 // this session's project follows Claude to whichever deck is doing the work right now.
@@ -13,10 +21,10 @@ const activity = atom({ plugin: 'starfleet', key: 'activity' } as const, { curre
 
 export const DECKS: { id: Deck; label: string; color: string }[] = [
   { id: 'bridge', label: 'DECK 1 · BRIDGE', color: '#ff9c4b' },
-  { id: 'science', label: 'DECK 4 · SENSORS AND LIBRARY', color: '#c9a0dc' },
-  { id: 'engineering', label: 'DECK 12 · ENGINEERING', color: '#9aa9ff' },
-  { id: 'sickbay', label: 'DECK 9 · SICKBAY', color: '#ff5555' },
-  { id: 'quarters', label: 'DECK 8 · CREW QUARTERS', color: '#8c8a96' },
+  { id: 'science', label: 'DECK 2 · SENSORS AND LIBRARY', color: '#c9a0dc' },
+  { id: 'engineering', label: 'DECK 3 · ENGINEERING', color: '#9aa9ff' },
+  { id: 'sickbay', label: 'DECK 4 · SICKBAY', color: '#ff5555' },
+  { id: 'quarters', label: 'DECK 5 · CREW QUARTERS', color: '#8c8a96' },
 ]
 export const DECK_H = 62
 const SLOT_W = 66
@@ -170,11 +178,16 @@ const CREW_TOOL = 'mcp__starfleet__starfleet_crew'
 const editLock = serial()
 // Folders with chats here that did not fit on the decks, offered by Add
 let spare: string[] = []
-// Which list the crew editor shows under its buttons, and in which pane, if any
-type Picker = { where: string; which: 'add' | 'remove' }
-let crewPicker: Picker | undefined
+// Manage crew: which page shows, which project's page is open, and what waits on an inline yes or
+// no (`remove`: the open project; a path: the folder picked on Add). `isTyping` shows the field for a
+// folder that isn't listed
+type ManagePage = 'crew' | 'add' | 'cloud'
+// `draft`: the characters as changed on the Crew page, kept until Save
+let manage: { page: ManagePage; confirm?: string; isTyping?: boolean; draft?: Record<string, string> } = { page: 'crew' }
 
-async function pathList($: EngineInterface, key: 'crewHidden' | 'crewAdded'): Promise<string[]> {
+// A pruned folder (store key crewPruned) is off the crew and off the Not aboard list too, so old
+// test folders stop piling up there. The folder itself is untouched; adding it again unprunes it
+async function pathList($: EngineInterface, key: 'crewHidden' | 'crewAdded' | 'crewPruned'): Promise<string[]> {
   const saved = await $.store.get(key)
   return Array.isArray(saved) ? (saved as string[]) : []
 }
@@ -182,7 +195,7 @@ export const hiddenProjects = ($: EngineInterface) => pathList($, 'crewHidden')
 
 // The most crew there is room for: one sprite each, less the picked cloud repos
 async function crewCap($: EngineInterface) {
-  return SPRITE_ORDER.length - (await cloudPicks($)).length
+  return CREW_MAX - (await cloudPicks($)).length
 }
 
 // Removing hides a folder and unpins it. Adding first undoes a removal; only a folder that still
@@ -190,11 +203,13 @@ async function crewCap($: EngineInterface) {
 // Answers why it couldn't, or undefined when done
 async function setAboard($: EngineInterface, path: string, isAboard: boolean): Promise<string | undefined> {
   const wasHidden = (await hiddenProjects($)).includes(path)
-  if (!isAboard || wasHidden) {
+  const wasPruned = (await pathList($, 'crewPruned')).includes(path)
+  if (!isAboard || wasHidden || wasPruned) {
     await editLock(async () => {
       const hidden = (await pathList($, 'crewHidden')).filter(p => p !== path)
       await $.store.set('crewHidden', isAboard ? hidden : [...hidden, path])
       if (!isAboard) await $.store.set('crewAdded', (await pathList($, 'crewAdded')).filter(p => p !== path))
+      if (isAboard && wasPruned) await $.store.set('crewPruned', (await pathList($, 'crewPruned')).filter(p => p !== path))
     })
     await scanCrew($)
   }
@@ -214,106 +229,270 @@ async function setAboard($: EngineInterface, path: string, isAboard: boolean): P
   return undefined
 }
 
-// The question popup; a dismissed one answers nothing
-async function ask($: EngineInterface, question: string, options: string[]): Promise<string | undefined> {
-  try {
-    return await $.ui.ask(question, { header: 'Crew', options })
-  } catch {
-    return undefined
-  }
-}
+// Confirms are inline buttons, not the app's question box: on desktop that box can open where it
+// isn't seen, and the chat then spins on a turn that waits for an answer no one can give
 
-// Any answer closes the list the name was picked from
-function closePicker($: EngineInterface) {
-  crewPicker = undefined
+function setManage($: EngineInterface, next: Partial<typeof manage>) {
+  manage = { page: manage.page, draft: manage.draft, ...next }
   $.ui.invalidate('ui.render')
 }
 
-export async function confirmRemove($: EngineInterface, path: string) {
-  const name = basename(path)
-  // Keep comes first, so the safe answer is the default
-  const answer = await ask($, `Remove ${name} from the crew?`, ['Keep', `Remove ${name}`])
-  closePicker($)
-  if (answer !== `Remove ${name}`) return
+// Open Manage crew, on one of its pages; the console's crew buttons and /crew both come here
+export async function openManageCrew($: EngineInterface, page: ManagePage = 'crew') {
+  setManage($, { page })
+  void loadRecentRepos($).then(() => $.ui.invalidate('ui.render'))
+  return $.ui.open({ id: CREW_PANE, title: '👥 Manage crew', focus: true, closeOnEscape: true })
+}
+
+async function removeFromCrew($: EngineInterface, path: string) {
+  setManage($, { draft: undefined })
   await setAboard($, path, false)
-  $.ui.toast(`${name} left the crew. The rest of the mod still runs in its chats.`)
+  $.ui.toast(`${basename(path)} left the crew. The rest of the mod still runs in its chats.`)
 }
 
-export async function confirmAdd($: EngineInterface, path: string) {
-  const name = basename(path)
-  const answer = await ask($, `Add ${name} to the crew?`, [`Add ${name}`, 'Cancel'])
-  closePicker($)
-  if (answer !== `Add ${name}`) return
-  $.ui.toast((await setAboard($, path, true)) ?? `${name} joined the crew.`)
+async function addToCrew($: EngineInterface, path: string) {
+  const problem = await setAboard($, path, true)
+  // Land on the Crew page, where the newcomer's character can be changed
+  setManage($, problem ? {} : { page: 'crew', draft: undefined })
+  $.ui.toast(problem ?? `${basename(path)} joined the crew.`)
 }
 
-// A folder with no chats here yet: typed under Other as a full path (~ for home)
-async function addOtherFolder($: EngineInterface) {
-  const answer = await ask($, 'Which folder should join the crew? Type its full path under Other.', ['Cancel', 'Pick from the list'])
-  if (answer !== 'Pick from the list') closePicker($)
-  if (!answer || answer === 'Cancel' || answer === 'Pick from the list') return
+// Prune a folder off the Not aboard list at once: it is easy to undo (type its path under Add
+// another folder), so it doesn't ask. A spare takes its place on the next scan
+async function pruneFolder($: EngineInterface, path: string) {
+  await editLock(async () => {
+    const pruned = await pathList($, 'crewPruned')
+    if (!pruned.includes(path)) await $.store.set('crewPruned', [...pruned, path])
+    await $.store.set('crewHidden', (await pathList($, 'crewHidden')).filter(p => p !== path))
+  })
+  await scanCrew($)
+  $.ui.invalidate('ui.render')
+  $.ui.toast(`${basename(path)} pruned from the list. The folder itself is untouched.`)
+}
+
+// A folder with no chats here yet, typed as a full path (~ for home); typing it is the confirm
+async function addOtherFolder($: EngineInterface, typed: string) {
   const home = (await $.env.get('HOME')) ?? ''
-  const path = answer.trim().replace(/^~(?=\/|$)/, home).replace(/\/+$/, '')
+  const path = typed.trim().replace(/^~(?=\/|$)/, home).replace(/\/+$/, '')
   if (!path.startsWith('/') || !(await $.fs.exists(path))) {
-    $.ui.toast(`No folder at ${answer.trim()}. Give its full path, like ~/Projects/app.`)
+    $.ui.toast(`No folder at ${typed.trim()}. Give its full path, like ~/Projects/app.`)
     return
   }
-  $.ui.toast((await setAboard($, path, true)) ?? `${basename(path)} joined the crew.`)
+  await addToCrew($, path)
 }
 
-// Remove and Add buttons, and the list the pressed one opens: each project's name is a button
-// that asks before it changes anything. Drawn in the console and in /crew
-export async function crewEditor($: EngineInterface, el: ReturnType<EngineInterface['ui']['resolve']>, crew: CrewMember[], where: 'console' | 'crew') {
+// Give a project the character picked for it. One who already serves another project swaps with
+// it, so no two projects ever share a character or a chat tag. The pick sticks like any other
+export async function pickCharacter($: EngineInterface, path: string, sprite: string) {
+  await editLock(async () => {
+    const assigned = ((await $.store.get('crewAssign')) ?? {}) as Record<string, string>
+    const before = assigned[path]
+    for (const [other, held] of Object.entries(assigned)) if (held === sprite && other !== path) {
+      if (before) assigned[other] = before
+      else delete assigned[other]
+    }
+    assigned[path] = sprite
+    await $.store.set('crewAssign', assigned)
+  })
+  await scanCrew($)
+  $.ui.invalidate('ui.render')
+}
+
+type El = ReturnType<EngineInterface['ui']['resolve']>
+
+// A crew member's sprite at about a line of text tall, for the Crew page rows and the bench
+function miniSvg(sprite: string): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 9" width="16" height="18" shape-rendering="crispEdges">${pixels(SPRITES[sprite]?.rows ?? [], CREW_PALETTE)}</svg>`
+}
+
+function mini(el: El, sprite: string): RenderElement {
+  return 'Svg' in el ? <el.Svg source={miniSvg(sprite)} alt={SPRITES[sprite]?.name ?? sprite} width={16} height={18} /> : <el.Text>{' '}</el.Text>
+}
+
+// The characters as the Crew page shows them: the draft when one is open, else what's saved
+function draftOf(crew: CrewMember[]): Record<string, string> {
+  return manage.draft ?? Object.fromEntries(crew.map(c => [c.path, c.sprite]))
+}
+
+// The next character for one project, stepping through the cast in its order but only over the
+// free ones (benched in the draft) and its own, so no two projects can ever hold the same one
+function cycle($: EngineInterface, crew: CrewMember[], path: string, by: 1 | -1) {
+  const draft = draftOf(crew)
+  const taken = new Set(Object.entries(draft).filter(([p]) => p !== path).map(([, s]) => s))
+  const options = SPRITE_ORDER.filter(k => !taken.has(k))
+  const at = Math.max(0, options.indexOf(draft[path]!))
+  setManage($, { draft: { ...draft, [path]: options[(at + by + options.length) % options.length]! } })
+}
+
+// Save writes every change in the draft at once; the draft never holds a character twice
+async function saveDraft($: EngineInterface) {
+  const draft = manage.draft
+  if (!draft) return
+  await editLock(async () => {
+    const assigned = ((await $.store.get('crewAssign')) ?? {}) as Record<string, string>
+    await $.store.set('crewAssign', { ...assigned, ...draft })
+  })
+  setManage($, { draft: undefined })
+  await scanCrew($)
+  $.ui.toast('👥 Crew assignments saved.')
+}
+
+// The Crew page: every project aboard with its character, changed with ◀ ▶ and kept only on Save,
+// then the bench of characters no project has. Kept to a line a row so the tab fits without scrolling
+// (a scrolling pane shivers once a button in it has focus)
+function crewPage($: EngineInterface, el: El, crew: CrewMember[], cwd: string): RenderElement {
   const { Box, Text, Button } = el
-  const cwd = projectOf(await $.session.cwd())!
-  const local = crew.filter(c => !c.path.startsWith(CLOUD_PREFIX))
-  const aboard = new Set(crew.map(c => c.path))
-  const offer = [...new Set([...(aboard.has(cwd) ? [] : [cwd]), ...(await hiddenProjects($)), ...spare])].filter(p => !aboard.has(p))
-  const shown = crewPicker?.where === where ? crewPicker.which : undefined
-  const toggle = (which: 'add' | 'remove') => () => {
-    crewPicker = shown === which ? undefined : { where, which }
-    $.ui.invalidate('ui.render')
-  }
+  if (crew.length === 0) return <Text dimColor>No crew aboard yet. Open Add / remove to bring one onto the decks.</Text>
+  const draft = draftOf(crew)
+  const isChanged = crew.some(c => draft[c.path] !== c.sprite)
+  const benched = SPRITE_ORDER.filter(k => !Object.values(draft).includes(k))
   return (
     <Box flexDirection="column" rowGap={1}>
-      <Box flexDirection="row" columnGap={2} flexWrap="wrap">
-        <Button key="crew-add" label={shown === 'add' ? '▾ Add project' : '+ Add project'} plain onPress={toggle('add')} />
-        <Button key="crew-remove" label={shown === 'remove' ? '▾ Remove project' : '− Remove project'} plain onPress={toggle('remove')} />
+      <Text bold>Claimed</Text>
+      <Box flexDirection="column">
+        {crew.map(c => {
+          const sprite = draft[c.path]!
+          return (
+            <Box key={`row-${c.path}`} flexDirection="row" columnGap={1} alignItems="center">
+              <Button key={`prev-${c.path}`} label="◀" plain dimColor onPress={() => cycle($, crew, c.path, -1)} />
+              {mini(el, sprite)}
+              <Button key={`next-${c.path}`} label="▶" plain dimColor onPress={() => cycle($, crew, c.path, 1)} />
+              <Text wrap="truncate">
+                {SPRITES[sprite]?.emoji ?? ''} <Text bold color={sprite !== c.sprite ? LCARS.gold : undefined}>{SPRITES[sprite]?.name ?? sprite}</Text>
+                <Text dimColor> · {c.project}{c.path === cwd ? ' (this chat)' : ''}</Text>
+              </Text>
+            </Box>
+          )
+        })}
       </Box>
-      {shown === 'remove' && (
-        <Box flexDirection="column">
-          <Text dimColor>Pick the project to remove. You'll be asked to confirm.</Text>
-          <Box flexDirection="row" columnGap={2} flexWrap="wrap">
-            {local.length === 0 && <Text dimColor>No projects aboard yet. Press + Add project to bring one onto the decks.</Text>}
-            {local.map(c => <Button key={`crew-pick-${c.path}`} label={`${SPRITES[c.sprite]?.emoji ?? ''} ${c.project}`} plain onPress={() => confirmRemove($, c.path)} />)}
+      <Box flexDirection="row" columnGap={2} alignItems="center">
+        {isChanged
+          ? <Button key="crew-save" label="Save" variant="primary" onPress={() => saveDraft($)} />
+          : <Text dimColor>◀ ▶ changes a project's character. Nothing changes until you press Save.</Text>}
+        {isChanged && <Button key="crew-cancel" label="Cancel" plain onPress={() => setManage($, { draft: undefined })} />}
+        {isChanged && <Text color={LCARS.gold}>Unsaved changes</Text>}
+      </Box>
+      <Text bold>Benched</Text>
+      {benched.length === 0 && <Text dimColor>Every character has a project.</Text>}
+      {/* Two columns side by side, each read top to bottom: the first half of the bench (the squares)
+          down the left, the rest down the right */}
+      <Box flexDirection="row" columnGap={2}>
+        {[benched.slice(0, Math.ceil(benched.length / 2)), benched.slice(Math.ceil(benched.length / 2))].map((column, i) => (
+          <Box key={`bench-col-${i}`} flexDirection="column" width="50%" flexShrink={1} minWidth={0}>
+            {column.map(k => (
+              <Box key={`bench-${k}`} flexDirection="row" columnGap={1} alignItems="center">
+                {mini(el, k)}
+                <Text wrap="truncate">{SPRITES[k]!.emoji} {SPRITES[k]!.name}</Text>
+              </Box>
+            ))}
           </Box>
-        </Box>
-      )}
-      {shown === 'add' && (
-        <Box flexDirection="column">
-          <Text dimColor>Pick the project to add. You'll be asked to confirm.</Text>
-          <Box flexDirection="row" columnGap={2} flexWrap="wrap">
-            {offer.map(p => <Button key={`crew-pick-${p}`} label={p === cwd ? `${basename(p)} (this chat)` : basename(p)} plain onPress={() => confirmAdd($, p)} />)}
-            <Button key="crew-other" label="Add another folder…" plain onPress={() => addOtherFolder($)} />
-          </Box>
-        </Box>
-      )}
+        ))}
+      </Box>
     </Box>
   )
 }
 
-// For the crew tool: find the folder by its name on the decks (or full path) and move it
-async function setProjectByName($: EngineInterface, name: string, isAboard: boolean): Promise<string> {
-  const hidden = await hiddenProjects($)
-  const want = name.trim().toLowerCase()
-  const known = [...roster.map(c => c.path).filter(p => !p.startsWith(CLOUD_PREFIX)), ...hidden, ...spare]
-  const path = known.find(p => p.toLowerCase() === want || basename(p).toLowerCase() === want)
-  if (!path) return `No project named ${name}. Crew: ${roster.map(c => c.project).join(', ') || 'none'}${hidden.length ? `. Removed: ${hidden.map(basename).join(', ')}` : ''}`
-  const refused = await setAboard($, path, isAboard)
-  if (refused) return refused
-  return isAboard
-    ? `${basename(path)} is aboard the crew.`
-    : `${basename(path)} left the crew: off the crew decks, the hub roster and the sidebar emoji. The rest of the mod still runs there.`
+// The Add / remove page, in two columns: the crew on the left, each with → to move it off (asking
+// first, Keep the default), and the folders not aboard on the right, each with ← to bring it on at
+// once, plus a field for any other folder
+async function addPage($: EngineInterface, el: El, crew: CrewMember[], cwd: string): Promise<RenderElement> {
+  const { Box, Text, Button } = el
+  const aboard = new Set(crew.map(c => c.path))
+  const pruned = new Set(await pathList($, 'crewPruned'))
+  const offer = [...new Set([...(aboard.has(cwd) ? [] : [cwd]), ...(await hiddenProjects($)), ...spare])].filter(p => !aboard.has(p) && !pruned.has(p))
+  const isFull = crew.length >= CREW_MAX
+  const picked = manage.confirm
+  if (picked?.startsWith('remove:')) {
+    const path = picked.slice('remove:'.length)
+    const name = basename(path)
+    const isCloud = path.startsWith(CLOUD_PREFIX)
+    return (
+      <Box flexDirection="row" columnGap={2} flexWrap="wrap" alignItems="center">
+        <Text bold>Remove {name} from the crew?</Text>
+        <Button key="crew-no" label="Keep" plain onPress={() => setManage($, {})} />
+        <Button key="crew-yes" label={`Remove ${name}`} plain onPress={() => (isCloud ? toggleCloudPick($, path.slice(CLOUD_PREFIX.length)).then(() => scanCrew($)).then(() => setManage($, {})) : removeFromCrew($, path))} />
+      </Box>
+    )
+  }
+  return (
+    <Box flexDirection="row" columnGap={2}>
+      <Box width="50%" flexDirection="column" flexShrink={1} minWidth={0}>
+        <Text bold>On the crew</Text>
+        {crew.length === 0 && <Text dimColor>No crew aboard yet.</Text>}
+        {crew.map(c => (
+          <Box key={`aboard-${c.path}`} flexDirection="row" columnGap={1} alignItems="center">
+            <Text wrap="truncate">{SPRITES[c.sprite]?.emoji ?? ''} {c.project}</Text>
+            <Button key={`crew-drop-${c.path}`} label="→" plain dimColor onPress={() => setManage($, { confirm: `remove:${c.path}` })} />
+          </Box>
+        ))}
+      </Box>
+      <Box width="50%" flexDirection="column" flexShrink={1} minWidth={0}>
+        <Text bold>Not aboard</Text>
+        {isFull && <Text dimColor>The crew is full: {CREW_MAX} aboard. Move one over to make room.</Text>}
+        {offer.length === 0 && <Text dimColor>No other projects with chats here.</Text>}
+        {offer.length > 0 && <Text dimColor>✕ prunes a folder off this list. The folder itself stays.</Text>}
+        {/* The list shows even when the crew is full, so it can still be pruned; ← only when there is room */}
+        {offer.map(p => (
+          <Box key={`ashore-${p}`} flexDirection="row" columnGap={1} alignItems="center">
+            {!isFull && <Button key={`crew-pick-${p}`} label="←" plain dimColor onPress={() => addToCrew($, p)} />}
+            <Text wrap="truncate">{basename(p)}{p === cwd ? ' (this chat)' : ''}</Text>
+            <Button key={`crew-prune-${p}`} label="✕" plain dimColor onPress={() => pruneFolder($, p)} />
+          </Box>
+        ))}
+        {!isFull && !manage.isTyping && <Button key="crew-other" label="Add another folder…" plain onPress={() => setManage($, { isTyping: true })} />}
+        {!isFull && manage.isTyping && 'Input' in el && (
+          <Box flexDirection="column">
+            <Text dimColor>Type its full path, like ~/Projects/app, then ↵.</Text>
+            <el.Input key="crew-other-path" value="" submitLabel="↵" onSubmit={value => addOtherFolder($, value)} />
+          </Box>
+        )}
+      </Box>
+    </Box>
+  )
+}
+
+// The Cloud repos page: repos cloud sessions work in, picked to come aboard
+async function cloudPage($: EngineInterface, el: El, now: number): Promise<RenderElement> {
+  const { Box, Text, Button } = el
+  const picks = await cloudPicks($)
+  return (
+    <Box flexDirection="column" rowGap={1}>
+      <Text color={LCARS.gold}>Cloud environments may reduce mod functionality.</Text>
+      {repoProblem && <Text dimColor>GitHub not reachable: {repoProblem}</Text>}
+      {!repoProblem && recentRepos.length === 0 && <Text dimColor>Reading your GitHub repos…</Text>}
+      {/* Two columns side by side, each read top to bottom (newest pushed first), like the bench */}
+      <Box flexDirection="row" columnGap={2}>
+        {[recentRepos.slice(0, Math.ceil(recentRepos.length / 2)), recentRepos.slice(Math.ceil(recentRepos.length / 2))].map((column, i) => (
+          <Box key={`cloud-col-${i}`} flexDirection="column" width="50%" flexShrink={1} minWidth={0} alignItems="flex-start">
+            {column.map(r => {
+              const isPicked = picks.includes(r.repo)
+              return <Button key={`cloud-${r.repo}`} label={`${isPicked ? '☑' : '☐'} ${r.repo.split('/').pop()} · ${ago(now - r.pushedAt)}`} {...(isPicked ? {} : { plain: true as const })} onPress={async () => {
+                await toggleCloudPick($, r.repo)
+                await scanCrew($)
+                $.ui.invalidate('ui.render')
+              }} />
+            })}
+          </Box>
+        ))}
+      </Box>
+    </Box>
+  )
+}
+
+// The starfleet_crew tool: a project by its folder name (any case) or full path, off the crew or
+// back aboard. Answers what happened, for Claude to relay
+async function setProjectByName($: EngineInterface, project: string, isAboard: boolean): Promise<string> {
+  const home = (await $.env.get('HOME')) ?? ''
+  const typed = project.trim().replace(/^~(?=\/|$)/, home).replace(/\/+$/, '')
+  const known = [...new Set([...roster.map(c => c.path), ...(await hiddenProjects($)), ...(await pathList($, 'crewAdded')), ...(await pathList($, 'crewPruned')), ...spare, projectOf(await $.session.cwd())!])]
+  const path = typed.startsWith('/') ? typed : known.find(p => basename(p).toLowerCase() === typed.toLowerCase())
+  if (!path || (typed.startsWith('/') && !(await $.fs.exists(path)))) return `No project folder named ${project}. Give its folder name as the crew decks show it, or its full path.`
+  const name = basename(path)
+  if (!isAboard) {
+    await setAboard($, path, false)
+    return `${name} left the crew: off the crew decks, the hub roster and the sidebar emoji. The rest of the mod still runs there.`
+  }
+  return (await setAboard($, path, true)) ?? `${name} is aboard.`
 }
 
 // How many sessions one archive check reads from the app
@@ -413,8 +592,11 @@ async function runScan($: EngineInterface) {
   entries.sort((a, b) => b.mtimeMs - a.mtimeMs)
   const health = ((await $.store.get('health')) ?? {}) as Record<string, boolean>
   const assigned = ((await $.store.get('crewAssign')) ?? {}) as Record<string, string>
+  // A retired sprite passes to the character who replaced it (Quark's projects become the Gorn's)
+  for (const [path, sprite] of Object.entries(assigned)) if (RETIRED_SPRITES[sprite]) assigned[path] = RETIRED_SPRITES[sprite]!
   const archived = await archivedProjects($)
-  const hidden = new Set(await hiddenProjects($))
+  // Pruned folders are skipped like removed ones, so they leave the spares too
+  const hidden = new Set([...(await hiddenProjects($)), ...(await pathList($, 'crewPruned'))])
   const now = await $.clock.now()
   const found: typeof roster = []
   const decks: Record<string, Deck> = {}
@@ -434,7 +616,8 @@ async function runScan($: EngineInterface) {
     // Scratch, temp and .claude chats never join: skip them before the costly decode
     if (/^-(private|tmp)-|--claude-/.test(entry.name)) continue
     const path = await decodeProjectDir($, entry.name)
-    if (!path || seen.has(path) || hidden.has(path) || /\/\.claude\/|\/tmp\/|\/private\/|\/Library\//.test(path) || path === home) continue
+    // The home folder counts too: a chat opened without a project folder is a project of its own
+    if (!path || seen.has(path) || hidden.has(path) || /\/\.claude\/|\/tmp\/|\/private\/|\/Library\//.test(path)) continue
     const isAdded = added.includes(path)
     // Archived in the app: off the decks (this session's project and added ones always stay)
     if (archived.has(path) && path !== cwd && !isAdded) continue
@@ -668,7 +851,7 @@ export async function crewSessionStart($: EngineInterface) {
   })
   // Scan once at start, so this chat gets its crew emoji without waiting for a turn to end
   void scanCrew($).catch(() => {})
-  await $.command.register({ name: 'crew', description: 'Open the crew decks: your projects as 8-bit crew members, and pick cloud repos to bring aboard', immediate: true })
+  await $.command.register({ name: 'crew', description: 'Open the crew decks: your projects as 8-bit crew members, and pick cloud repos to bring aboard', immediate: true }).catch(() => {})
 }
 
 export async function crewTurnComplete($: EngineInterface) {
@@ -692,49 +875,38 @@ export function registerCrew(on: On) {
 
   on('command.run', { command: 'crew' }, async $ => {
     await scanCrew($)
-    void loadRecentRepos($).then(() => $.ui.invalidate('ui.render'))
-    const opened = await $.ui.open({ id: CREW_PANE, title: '👥 Crew decks', closeOnEscape: true })
-    return opened.isPlaced ? {} : { text: `Crew pane not shown: ${opened.reason}` }
+    const opened = await openManageCrew($)
+    return opened.isPlaced ? {} : { text: `Manage crew not shown: ${opened.reason}` }
   })
 
+  // Manage crew: three short pages across the top instead of one long list, so the tab fits
+  // without scrolling
   on('ui.render', { component: 'Pane', requestId: CREW_PANE }, async ($, e) => {
     const el = $.ui.resolve(e)
     const { Box, Text, Button } = el
     const crew = await crewNow($)
-    const picks = await cloudPicks($)
-    const editor = await crewEditor($, el, crew, 'crew')
+    const cwd = projectOf(await $.session.cwd())!
     const now = await $.clock.now()
-    const width = Math.max(260, Math.min(560, ((e.props.bodyColumns ?? 50) - 2) * 8))
+    const tab = (page: ManagePage, label: string) => (
+      <Button key={`manage-${page}`} label={label} {...(manage.page === page ? { variant: 'primary' as const } : { plain: true as const })} onPress={() => setManage($, { page })} />
+    )
+    const body = manage.page === 'add' ? await addPage($, el, crew, cwd)
+      : manage.page === 'cloud' ? await cloudPage($, el, now)
+      : crewPage($, el, crew, cwd)
     return (
       <Box flexDirection="column" rowGap={1} padding="sm">
-        <Text backgroundColor={HEAD_COLOR} color={LCARS.ink} bold> CREW DECKS · {crew.length} ABOARD </Text>
-        {crew.length === 0 && <Text dimColor>Scanning for crew… no projects found in ~/.claude/projects yet.</Text>}
-        {crew.length > 0 && ('Svg' in el
-          ? <Box width="100%"><el.Svg source={crewSvg(crew, now)} alt={crew.map(c => `${SPRITES[c.sprite]?.emoji ?? ''} ${c.name} (${c.project}) on ${c.deck}`).join(', ')} /></Box>
-          : null)}
-        <Box flexDirection="column">
-          {crew.map(c => (
-            <Text>
-              {SPRITES[c.sprite]?.emoji ?? '  '} <Text color={LCARS.peach} bold>{c.name.padEnd(8)}</Text> {c.project.padEnd(18)} <Text color={LCARS.lilac}>{c.deck.padEnd(12)}</Text> <Text dimColor>{c.isCurrent ? 'this session · ' : ''}{c.status}</Text>
-            </Text>
-          ))}
+        <Text backgroundColor={HEAD_COLOR} color={LCARS.ink} bold> MANAGE CREW · {crew.length} OF {CREW_MAX} ABOARD </Text>
+        <Box flexDirection="row" columnGap={1} flexWrap="wrap">
+          {tab('crew', 'Crew')}
+          {tab('add', 'Add / remove')}
+          {tab('cloud', 'Cloud repos')}
         </Box>
-        {editor}
+        {body}
+        <Text dimColor italic>Up to {CREW_MAX} crew aboard, one character each, so everyone fits on the viewscreen and decks.</Text>
         {archiveProblem && <Text dimColor>Archived projects not hidden: {archiveProblem}</Text>}
-        <Button key="rescan" label="Rescan crew (r)" hotkey="r" onPress={async () => { await scanCrew($); $.ui.invalidate('ui.render') }} />
-        <Text backgroundColor={HEAD_COLOR} color={LCARS.ink} bold> CLOUD CREW · PICK UP TO 4 REPOS </Text>
-        <Text dimColor>Cloud sessions leave no folder on this Mac. Pick the repos they work in to bring them aboard.</Text>
-        {repoProblem && <Text dimColor>GitHub not reachable: {repoProblem}</Text>}
-        {!repoProblem && recentRepos.length === 0 && <Text dimColor>Reading your GitHub repos…</Text>}
-        <Box flexDirection="row" columnGap={2} flexWrap="wrap">
-          {recentRepos.map(r => {
-            const isPicked = picks.includes(r.repo)
-            return <Button key={`cloud-${r.repo}`} label={`${isPicked ? '☑' : '☐'} ${r.repo.split('/').pop()} · ${ago(now - r.pushedAt)}`} {...(isPicked ? {} : { plain: true as const })} onPress={async () => {
-              await toggleCloudPick($, r.repo)
-              await scanCrew($)
-              $.ui.invalidate('ui.render')
-            }} />
-          })}
+        <Box flexDirection="column">
+          <Button key="rescan" label="Rescan crew" hotkey="n" plain onPress={() => rescan($)} />
+          <Text dimColor>Re-reads your project folders, their git changes and archived chats now. The crew rescans at the end of every turn, so use this when the decks look out of date between turns: after archiving a chat, committing outside Claude, or making a new project folder.</Text>
         </Box>
       </Box>
     )

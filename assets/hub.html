@@ -54,6 +54,9 @@ section { margin-top: 28px; }
 .deck { font-family: var(--display); font-size: 13px; letter-spacing: .06em; text-transform: uppercase; padding: 1px 10px; border-radius: 10px; color: var(--space); }
 .d-bridge { background: var(--orange); } .d-engineering { background: var(--blue); } .d-sickbay { background: var(--red); } .d-quarters { background: var(--muted); }
 .mis .row { grid-template-columns: 124px minmax(0, 1fr) auto; }
+.crewmark { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 12px; color: var(--muted); vertical-align: middle; }
+.crewmark svg { image-rendering: pixelated; flex: none; }
+.crewmark.big { font-family: var(--display); font-size: 16px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg); gap: 10px; }
 .pill { font-family: var(--mono); font-size: 12px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
 .pill.red { border-color: var(--red); color: var(--red); } .pill.ho { border-color: var(--lilac); color: var(--lilac); }
 .empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 4px; padding: 16px; color: var(--muted); margin-top: 12px; }
@@ -105,6 +108,27 @@ textarea.field { resize: vertical; min-height: 300px; line-height: 1.6; font-siz
 .meta select { background: var(--space); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; font: inherit; padding: 3px 6px; max-width: 100%; }
 .saved { color: var(--green); } .saving { color: var(--peach); } .err { color: var(--red); }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+/* Log categories: a colored pill per entry, and a filter bar over a project's Captain's log */
+.cat { display: inline-flex; align-items: center; gap: 4px; font-family: var(--display); font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--space); background: var(--c, var(--lilac)); padding: 0 10px; border-radius: 10px; white-space: nowrap; justify-self: start; align-self: flex-start; }
+.catbar { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }
+.catbar button { all: unset; box-sizing: border-box; cursor: pointer; font-family: var(--display); font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg); border: 1px solid var(--c, var(--line)); border-radius: 12px; padding: 3px 12px; min-height: 30px; display: inline-flex; align-items: center; gap: 6px; }
+.catbar button[aria-pressed="true"] { background: var(--c, var(--fg)); color: var(--space); }
+.catbar button:focus-visible { outline: 2px solid var(--peach); outline-offset: 2px; }
+.catbar b { font-family: var(--mono); font-weight: 400; font-size: 12px; }
+.row.lr { grid-template-columns: 64px 108px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding-block: 6px; }
+.row.lr .open-e { all: unset; box-sizing: border-box; cursor: pointer; min-width: 0; overflow-wrap: anywhere; padding: 4px 0; border-radius: 2px; }
+.row.lr .open-e:hover { color: var(--peach); text-decoration: underline; text-underline-offset: 3px; }
+.row.lr .open-e:focus-visible, .xdel:focus-visible { outline: 2px solid var(--peach); outline-offset: 2px; }
+/* Delete one entry: a quiet square that turns red on hover, always there so it works on touch */
+.xdel { all: unset; box-sizing: border-box; cursor: pointer; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 4px; color: var(--muted); font-size: 16px; line-height: 1; }
+.xdel:hover { color: var(--red); background: var(--panel2); }
+@media (max-width: 560px) { .row.lr { grid-template-columns: 108px minmax(0, 1fr) auto; } .row.lr .sd { grid-column: 1 / -1; } }
+.back { all: unset; box-sizing: border-box; cursor: pointer; font-family: var(--mono); font-size: 12px; color: var(--peach); min-height: 28px; display: inline-flex; align-items: center; align-self: flex-start; }
+.back:hover { text-decoration: underline; } .back:focus-visible { outline: 2px solid var(--peach); outline-offset: 2px; }
+/* What was just deleted, with Undo, pinned to the bottom of the screen for a few seconds */
+.undo { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 20; display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 32px); background: var(--panel2); color: var(--fg); border: 1px solid var(--line); border-left: 6px solid var(--red); border-radius: 4px 18px 18px 4px; padding: 8px 10px 8px 14px; box-shadow: 0 8px 24px rgb(0 0 0 / .5); }
+.undo[hidden] { display: none; }
+.undo span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .logtext { background: var(--space); border: 1px solid var(--line); border-radius: 4px; padding: 14px; font-size: 17px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
 .cards button { all: unset; box-sizing: border-box; cursor: pointer; background: var(--space); border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; display: grid; gap: 4px; min-width: 0; }
@@ -191,7 +215,7 @@ dialog.viewer iframe { width: 100%; height: 78vh; border: 0; background: #fff; b
 </style>
 
 <div class="wrap">
-  <nav class="elbow" aria-label="Sections"><a class="b1" href="#top">LCARS 47</a><span aria-hidden="true"></span><a class="b2" href="#h-log">NOTES</a><span aria-hidden="true"></span><a class="b3" href="#h-crew">CREW</a><span aria-hidden="true"></span><a href="#h-mis">MISSIONS</a></nav>
+  <nav class="elbow" aria-label="Sections"><a class="b1" href="#top">LCARS 47</a><span aria-hidden="true"></span><a class="b2" href="#h-log">NOTES</a><span aria-hidden="true"></span><a href="#h-mis">MISSIONS</a></nav>
   <main>
     <header>
       <h1 id="top">Starfleet Command</h1>
@@ -220,11 +244,6 @@ dialog.viewer iframe { width: 100%; height: 78vh; border: 0; background: #fff; b
       </div>
     </section>
 
-    <section aria-labelledby="h-crew">
-      <h2 class="tag crew" id="h-crew">Crew roster</h2><span class="count" id="n-crew"></span>
-      <div id="crew"><div class="empty">The crew reports here after the first sync. Each of your code projects gets a crew member, standing on the deck that matches its state.</div></div>
-    </section>
-
     <section aria-labelledby="h-mis" class="mis">
       <div class="mis-head">
         <h2 class="tag mis" id="h-mis">Mission history</h2><span class="count" id="n-mis"></span>
@@ -236,12 +255,13 @@ dialog.viewer iframe { width: 100%; height: 78vh; border: 0; background: #fff; b
 
     <dialog class="viewer" id="viewer" aria-label="File viewer"><div class="vbar"><span id="v-name"></span><button class="btn o" id="v-dl" type="button" hidden>Download</button><button class="btn ghost" id="v-x" type="button">Close</button></div><div id="v-body"></div></dialog>
 
+    <div class="undo" id="undo" role="status" aria-live="polite" hidden></div>
     <p class="off" id="status">Connecting to ship’s records…</p>
   </main>
 </div>
 
 <script>
-const PAL = { s:'#f2c6a8', d:'#8a4a2a', a:'#f3e3c0', r:'#e0443e', y:'#e8a33a', g:'#b9b6c4', h:'#f6cf6a', k:'#1c1c22', v:'#8c8a96', b:'#3a2a22', t:'#4aa3c7', w:'#efe9df', n:'#6b3e24', p:'#9b6bb5', f:'#e88fb4', x:'#34343e', u:'#4caf50', q:'#e0a070' };
+const PAL = { s:'#f2c6a8', d:'#8a4a2a', a:'#f3e3c0', r:'#e0443e', y:'#e8a33a', g:'#b9b6c4', h:'#f6cf6a', k:'#1c1c22', v:'#8c8a96', b:'#3a2a22', t:'#4aa3c7', w:'#efe9df', n:'#6b3e24', p:'#9b6bb5', f:'#e88fb4', x:'#34343e', u:'#4caf50', q:'#e0a070', o:'#2e7d32', z:'#f0a050' };
 const SPRITES = {
   picard: ['..ssss..','.ssssss.','.sksskk.','.ssssss.','..ssss..','.rrrrrr.','rkrrrrkr','rrrrrrrr','.kk..kk.'],
   seven:  ['..hhhh..','.hhhhhh.','hskssksh','hssssssh','..ssss..','.gggggg.','gggggggg','.gggggg.','.gg..gg.'],
@@ -252,13 +272,17 @@ const SPRITES = {
   troi:   ['.kkkkkk.','kkssssk.','kskssksk','kssssssk','k.ssss.k','.pppppp.','pppppppp','.pppppp.','.pp..pp.'],
   guinan: ['.ffffff.','ffffffff','.dddddd.','.dkddkd.','..dddd..','.ffffff.','ffffffff','ffffffff','.ff..ff.'],
   q:      ['..nnnn..','.nssssn.','.skssks.','.ssssss.','..ssss..','.xhhhhx.','xxxhhxxx','xxxxxxxx','.xx..xx.'],
-  quark:  ['..qqqq..','q.qqqq.q','qqkqqkqq','qqqqqqqq','..qqqq..','.uuuuuu.','uhuuuuhu','uuuuuuuu','.kk..kk.'],
+  gorn:   ['.uuuuuu.','uuuuuuuu','uhkuukhu','uuuuuuuu','.uoooou.','uuuuuuuu','uouuuuou','uuuuuuuu','.oo..oo.'],
   crusher:['.rrrrrr.','rrssssrr','rskssksr','.ssssss.','..ssss..','.tttttt.','tkttttkt','tttttttt','.kk..kk.'],
+  tasha:  ['.hhhhhh.','hhsssshh','.skssks.','.ssssss.','..ssss..','.yyyyyy.','ykyyyyky','yyyyyyyy','.kk..kk.'],
+  wesley: ['..nnnn..','.nssssn.','.skssks.','.ssssss.','..ssss..','.ffffff.','ffggggff','ffffffff','.kk..kk.'],
+  tribble:['........','........','..dndn..','.dndndn.','dndndndn','ndndndnd','dndndndn','.ndndnd.','..dndn..'],
+  spot:   ['........','.z....z.','.zz..zz.','.zzzzzz.','.zkzzkz.','.zzfzzz.','.zyzyzz.','.zzzzzz.','.zz..zz.'],
 };
-function sprite(key, label) {
+function sprite(key, label, w = 48) {
   const rows = SPRITES[key] || SPRITES.data; let r = '';
   rows.forEach((row, y) => [...row].forEach((c, x) => { if (c !== '.') r += `<rect x="${x}" y="${y}" width="1" height="1" fill="${PAL[c]}"/>`; }));
-  return `<svg width="48" height="54" viewBox="0 0 8 9" shape-rendering="crispEdges" role="img" aria-label="${String(label).replace(/[&<>"']/g, ch => `&#${ch.charCodeAt(0)};`)}"><g class="bob">${r}</g></svg>`;
+  return `<svg width="${w}" height="${Math.round(w * 9 / 8)}" viewBox="0 0 8 9" shape-rendering="crispEdges" role="img" aria-label="${String(label).replace(/[&<>"']/g, ch => `&#${ch.charCodeAt(0)};`)}"><g class="bob">${r}</g></svg>`;
 }
 // The mod's stardate: month and day, then the year's last two digits (1027.26 is 27 Oct 2026)
 function stardate(ms) {
@@ -278,9 +302,21 @@ tickClock(); setInterval(tickClock, 15000);
 /* ---------- Notebook ---------- */
 // Synced /log entries stay in "log" (the mod owns them). Notes, folders and projects made here live in their own collections.
 const UNFILED = 'Unfiled';
-const S = { log: [], notes: [], folders: [], projects: [], crew: [], pins: [] };
+// Captain's log categories: must match LOG_CATEGORIES in the mod's hooks/shared.ts. Entries from before categories are notes
+const CATS = [
+  { id: 'note', label: 'Note', emoji: '📝', color: '#cc99cc' },
+  { id: 'idea', label: 'Idea', emoji: '💡', color: '#ffcc33' },
+  { id: 'bug', label: 'Bug', emoji: '🐞', color: '#ff5555' },
+  { id: 'decision', label: 'Decision', emoji: '⚖️', color: '#9aa9ff' },
+  { id: 'todo', label: 'To-do', emoji: '☑️', color: '#ff9966' },
+];
+const catOf = e => CATS.find(c => c.id === e.category) || CATS[0];
+function catPill(e) { const c = catOf(e), p = el('span', 'cat', c.emoji + ' ' + c.label); p.style.setProperty('--c', c.color); return p; }
+const S = { log: [], notes: [], folders: [], projects: [], pins: [] };
 let db = null;
 const store = { get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
+// Which category a project's Captain's log shows: 'all' or one id, kept in this browser
+let logCat = store.get('nb-logcat', 'all');
 let sel = store.get('nb-sel', null);          // {kind:'project'|'folder'|'note'|'log'|'logf', id, project}
 const open = new Set(store.get('nb-open', []));
 let paneKey = null, saveTimer = null, pending = null;
@@ -293,7 +329,7 @@ const byName = (a, b) => (a.name || '').localeCompare(b.name || '', undefined, {
 
 function projectNames() {
   const set = new Set();
-  [S.projects.map(p => p.name), S.log.map(projOf), S.notes.map(projOf), S.folders.map(projOf), S.crew.map(c => c.project).filter(Boolean)]
+  [S.projects.map(p => p.name), S.log.map(projOf), S.notes.map(projOf), S.folders.map(projOf)]
     .flat().forEach(n => n && set.add(n));
   return [...set].sort((a, b) => a === UNFILED ? 1 : b === UNFILED ? -1 : a.localeCompare(b, undefined, { sensitivity: 'base' }));
 }
@@ -302,7 +338,11 @@ function folderPath(fid) {
   while (f && guard++ < 20) { out.unshift(f); f = folderById(f.parent); }
   return out;
 }
-function setSel(s) { flush(); sel = s; store.set('nb-sel', s); renderTree(); renderPane(); }
+function setSel(s) {
+  flush(); sel = s; store.set('nb-sel', s); renderTree(); renderPane();
+  // On a phone the page sits under the tree: bring what was just opened into view
+  if (s && matchMedia('(max-width: 760px)').matches && document.activeElement?.closest?.('#tree')) $('page').scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+}
 function toggle(key, force) { const on = force ?? !open.has(key); on ? open.add(key) : open.delete(key); store.set('nb-open', [...open]); }
 function context() {
   if (!sel) return { project: projectNames()[0] || UNFILED, folder: '' };
@@ -407,7 +447,7 @@ function renderTree() {
       const logs = S.log.filter(e => projOf(e) === p);
       if (logs.length) {
         const lk = 'l:' + p, lf = treeItem('logf', 'Captain’s log', logs.length, { kind: 'logf', id: p, project: p }, lk);
-        if (open.has(lk)) { const lu = el('ul'); logs.forEach(e => lu.append(treeItem('logn', (e.stardate || '—') + '  ' + (e.text || ''), null, { kind: 'log', id: e.id, project: p }))); lf.append(lu); }
+        if (open.has(lk)) { const lu = el('ul'); logs.forEach(e => lu.append(treeItem('logn', catOf(e).emoji + ' ' + (e.stardate || '—') + '  ' + (e.text || ''), null, { kind: 'log', id: e.id, project: p }))); lf.append(lu); }
         inner.prepend(lf);
       }
       li.append(inner);
@@ -469,17 +509,42 @@ function renderPane() {
     const e = S.log.find(x => x.id === sel.id);
     if (!e) { host.replaceChildren(el('p', 'hint', 'That log entry is gone.')); return; }
     const p = projOf(e), acts = el('div', 'actions');
+    const back = el('button', 'back', '‹ ' + p + ' Captain’s log'); back.type = 'button';
+    back.onclick = () => setSel({ kind: 'logf', id: p, project: p });
     acts.append(btn('p', 'Turn into note', () => createNote(p, '', (e.text || '').split('\n')[0].slice(0, 60) || 'Log note', `${e.text || ''}\n\n— Logged at stardate ${e.stardate || '—'}`)),
-      armDelete('Delete entry', () => deleteLog(e)));
-    host.replaceChildren(crumb(p, '', 'Captain’s log'), el('div', 'field title', 'Stardate ' + (e.stardate || '—')), el('div', 'logtext', e.text || ''),
-      el('p', 'hint', 'Synced from /log in Claude Code. Deleting it here keeps it off the hub, and later syncs skip it.'), acts);
+      btn('warn', 'Delete entry', () => deleteLogs([e], 'Deleted “' + gist(e.text) + '”')));
+    host.replaceChildren(back, el('div', 'field title', 'Stardate ' + (e.stardate || '—')), catPill(e), el('div', 'logtext', e.text || ''),
+      el('p', 'hint', 'Synced from /log in Claude Code. A deleted entry stays off the hub; later syncs skip it.'), acts);
     return;
   }
 
   if (sel.kind === 'logf') {
     const p = sel.project, logs = S.log.filter(e => projOf(e) === p), list = el('div', 'list');
-    logs.forEach(e => { const r = el('div', 'row'); r.append(el('div', 'sd', e.stardate || '—'), el('div', 'txt', e.text || '')); list.append(r); });
-    host.replaceChildren(crumb(p, ''), el('div', 'field title', 'Captain’s log'), el('p', 'hint', logs.length + ' entries synced from /log.'), list);
+    // The filter bar: All, then each category that has entries (or is the one picked), with its count
+    if (logCat !== 'all' && !CATS.some(c => c.id === logCat)) logCat = 'all';
+    const bar = el('div', 'catbar'); bar.setAttribute('role', 'group'); bar.setAttribute('aria-label', 'Show entries by category');
+    const pick = id => { logCat = id; store.set('nb-logcat', id); paneKey = null; renderPane(); };
+    const chip = (id, text, n, color) => { const b = el('button'); b.type = 'button'; b.setAttribute('aria-pressed', logCat === id ? 'true' : 'false'); if (color) b.style.setProperty('--c', color); b.append(text, el('b', '', String(n))); b.onclick = () => pick(id); bar.append(b); };
+    chip('all', 'All', logs.length);
+    CATS.forEach(c => { const n = logs.filter(e => catOf(e).id === c.id).length; if (n || logCat === c.id) chip(c.id, c.emoji + ' ' + c.label, n, c.color); });
+    const shown = logCat === 'all' ? logs : logs.filter(e => catOf(e).id === logCat);
+    // Each row: the text opens the entry, ✕ deletes it at once (Undo puts it back)
+    shown.forEach(e => {
+      const r = el('div', 'row lr'), open = el('button', 'open-e', e.text || '(empty)'), x = el('button', 'xdel', '✕');
+      open.type = x.type = 'button';
+      open.onclick = () => setSel({ kind: 'log', id: e.id, project: p });
+      x.setAttribute('aria-label', 'Delete entry: ' + gist(e.text)); x.title = 'Delete entry';
+      x.onclick = () => deleteLogs([e], 'Deleted “' + gist(e.text) + '”');
+      r.append(el('div', 'sd', e.stardate || '—'), catPill(e), open, x); list.append(r);
+    });
+    if (!shown.length) list.append(el('div', 'row', 'No ' + (CATS.find(c => c.id === logCat)?.label.toLowerCase() || '') + ' entries in this project yet.'));
+    // Delete all takes only what the filter shows, and says how many
+    const acts = el('div', 'actions'), cat = CATS.find(c => c.id === logCat);
+    if (shown.length > 1) {
+      const label = cat ? `Delete all ${shown.length} ${cat.label.toLowerCase()} entries` : `Delete all ${shown.length} entries`;
+      acts.append(armDelete(label, () => deleteLogs(shown, `Deleted ${shown.length} ${cat ? cat.label.toLowerCase() + ' ' : ''}entries`)));
+    }
+    host.replaceChildren(crumb(p, ''), el('div', 'field title', 'Captain’s log'), el('p', 'hint', 'Synced from /log in Claude Code. Start a note with idea:, bug:, decision: or todo: to file it there.'), bar, list, acts);
     return;
   }
 
@@ -505,9 +570,9 @@ function renderPane() {
   const acts = el('div', 'actions');
   acts.append(btn('p', '+ Note here', () => createNote(project, fid)), btn('l', isFolder ? '+ Subfolder' : '+ Folder', () => openForm('folder')));
   if (isFolder) acts.append(armDelete('Delete folder', () => deleteFolder(f)));
-  else if (!S.notes.some(n => projOf(n) === project) && !S.folders.some(x => projOf(x) === project) && S.projects.some(x => x.name === project))
-    acts.append(armDelete('Remove project', () => { S.projects.filter(x => x.name === project).forEach(x => db.collection('projects').doc(x.id).delete().catch(saveErr)); setSel(null); }));
-  if (isFolder) parts.push(el('p', 'hint', 'Deleting a folder keeps its notes: they move up one level.'));
+  else acts.append(armDelete('Delete project', () => deleteProject(project)));
+  parts.push(el('p', 'hint', isFolder ? 'Deleting a folder keeps its notes: they move up one level.'
+    : 'Deleting the project removes everything in it here: notes, folders, pinned files and its Captain’s log. New /log entries from Claude Code start it again.'));
   parts.push(acts);
   host.replaceChildren(...parts);
 }
@@ -538,14 +603,70 @@ async function createNote(project, folder, title = 'Untitled note', body = '') {
     setSel({ kind: 'note', id: ref.id, project });
   } catch { $('status').textContent = 'Could not create the note. Check your connection.'; }
 }
-// A deleted log entry is remembered in logDeleted, so the next sync from Claude Code skips it
-async function deleteLog(e) {
-  const p = projOf(e);
+// Deleting log entries: each is remembered in logDeleted, so the next sync from Claude Code skips
+// it, and the toast offers Undo for a few seconds, which puts the entries back and forgets the mark.
+// Deleting is one press because Undo is there; the list stays open so pruning is quick
+let undoState = null;
+const UNDO_MS = 8000;
+async function deleteLogs(list, what) {
+  if (!list.length || !db) return;
+  const p = projOf(list[0]), kept = [];
   try {
-    await db.collection('logDeleted').doc(e.id).set({ at: Date.now(), project: p });
-    await db.collection('log').doc(e.id).delete();
-  } catch { $('status').textContent = 'Could not delete that entry. Check your connection.'; return; }
-  setSel(S.log.some(x => x.id !== e.id && projOf(x) === p) ? { kind: 'logf', id: p, project: p } : { kind: 'project', id: p, project: p });
+    for (const e of list) {
+      await db.collection('logDeleted').doc(e.id).set({ at: Date.now(), project: projOf(e) });
+      await db.collection('log').doc(e.id).delete();
+      kept.push(e);
+    }
+  } catch { $('status').textContent = 'Could not delete every entry. Check your connection.'; }
+  if (!kept.length) return;
+  // An open entry that is gone goes back to its project's log, or the project when none are left
+  if (sel?.kind === 'log' && kept.some(e => e.id === sel.id) || sel?.kind === 'logf' && !S.log.some(x => projOf(x) === p && !kept.includes(x)))
+    setSel(S.log.some(x => projOf(x) === p && !kept.includes(x)) ? { kind: 'logf', id: p, project: p } : { kind: 'project', id: p, project: p });
+  showUndo(kept, what);
+}
+// Deletes made while the toast is up join it, so one Undo puts back everything just deleted (after a
+// delete the next row's ✕ slides under the pointer, and a second press is easy to make)
+function showUndo(entries, what) {
+  clearTimeout(undoState?.timer);
+  const all = [...(undoState?.entries || []), ...entries];
+  undoState = { entries: all, timer: setTimeout(hideUndo, UNDO_MS) };
+  const bar = $('undo');
+  bar.replaceChildren(el('span', '', all.length > entries.length ? `Deleted ${all.length} entries` : what), btn('p', 'Undo', undoDelete));
+  bar.hidden = false;
+}
+function hideUndo() { clearTimeout(undoState?.timer); undoState = null; $('undo').hidden = true; }
+async function undoDelete() {
+  const st = undoState; hideUndo(); if (!st || !db) return;
+  try {
+    for (const e of st.entries) {
+      const { id, ...data } = e;
+      await db.collection('log').doc(id).set(data);
+      await db.collection('logDeleted').doc(id).delete();
+    }
+  } catch { $('status').textContent = 'Could not put every entry back. Check your connection.'; return; }
+  const p = projOf(st.entries[0]);
+  toggle('p:' + p, true);
+  if (sel?.kind === 'project' && sel.project === p) setSel({ kind: 'logf', id: p, project: p });
+}
+const gist = t => { t = (t || '').replace(/\s+/g, ' ').trim(); return t.length > 40 ? t.slice(0, 39) + '…' : t; };
+// A whole project: notes, folders, pinned files, its project doc, and its log entries (remembered
+// in logDeleted). Missions stay: they are the record of what was done
+async function deleteProject(p) {
+  try {
+    const mine = v => projOf(v) === p;
+    await Promise.all([
+      ...S.notes.filter(mine).map(n => db.collection('notes').doc(n.id).delete()),
+      ...S.folders.filter(mine).map(f => db.collection('folders').doc(f.id).delete()),
+      ...S.projects.filter(x => x.name === p).map(x => db.collection('projects').doc(x.id).delete()),
+    ]);
+    for (const x of S.pins.filter(x => (x.project || UNFILED) === p)) await unpin(x);
+    for (const e of S.log.filter(mine)) {
+      await db.collection('logDeleted').doc(e.id).set({ at: Date.now(), project: p });
+      await db.collection('log').doc(e.id).delete();
+    }
+  } catch { $('status').textContent = 'Could not delete all of ' + p + '. Check your connection.'; return; }
+  open.delete('p:' + p); store.set('nb-open', [...open]);
+  setSel(null);
 }
 // A deleted mission is remembered in missionDeleted, so the next sync from Claude Code skips it
 async function deleteMission(v) {
@@ -669,21 +790,13 @@ $('b-proj').onclick = () => openForm('project');
 $('b-fold').onclick = () => openForm('folder');
 $('b-note').onclick = () => { const c = context(); createNote(c.project, c.folder); };
 
-/* ---------- Crew & missions ---------- */
-function renderCrew(list) {
-  const host = $('crew');
-  $('n-crew').textContent = list.length ? list.length + ' aboard' : '';
-  if (!list.length) return;
-  const grid = el('div', 'crew');
-  list.forEach(v => { const c = el('div', 'card');
-    c.insertAdjacentHTML('beforeend', sprite(v.sprite, (v.name || 'Crew') + ' pixel sprite'));
-    c.append(el('div', 'nm', v.name || 'Crew member'));
-    c.append(el('div', 'pj', v.project || ''));
-    const deck = (v.deck || 'quarters').toLowerCase();
-    c.append(el('span', 'deck d-' + deck, deck));
-    if (v.status) c.append(el('div', 'pj', v.status));
-    grid.append(c); });
-  host.replaceChildren(grid);
+/* ---------- Missions ---------- */
+function crewMark(v, w) {
+  const m = el('span', 'crewmark');
+  if (!v.sprite || !SPRITES[v.sprite]) return null;
+  m.insertAdjacentHTML('beforeend', sprite(v.sprite, (v.crewName || v.sprite) + ' pixel sprite', w));
+  m.append(el('span', '', [v.tag, v.crewName].filter(Boolean).join(' ')));
+  return m;
 }
 let missions = [], misSel = store.get('mis-sel', null);
 function renderMissions(list) {
@@ -699,7 +812,7 @@ function renderMissions(list) {
     row.setAttribute('aria-label', 'Open mission record: ' + (v.summary || 'Mission') + (v.project ? ', ' + v.project : ''));
     row.onclick = () => { misSel = misSel === v.id ? null : v.id; store.set('mis-sel', misSel); renderMissions(missions); if (misSel) $('mis-rec').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
     row.append(el('div', 'sd', v.stardate || '—'));
-    const t = el('div', 'txt', v.summary || 'Mission'); if (v.project) { t.append(' '); t.append(el('span', 'proj', '· ' + v.project)); }
+    const t = el('div', 'txt', v.summary || 'Mission'); if (v.project) { t.append(' '); const mk = crewMark(v, 14); if (mk) t.append(mk, ' '); t.append(el('span', 'proj', (mk ? '' : '· ') + v.project)); }
     row.append(t);
     const pills = el('div'); pills.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
     pills.append(el('span', 'pill', (v.turns || 0) + ' turns'));
@@ -812,6 +925,8 @@ function renderRecord() {
   head.append(el('div', 'crumb'), el('h3', '', v.summary || 'Mission' + (v.project ? ' in ' + v.project : '')), recTools);
   head.firstChild.append(el('b', '', v.project || 'Unknown project'), ' · Stardate ' + (v.stardate || '—') + (v.cwd ? ' · ' + v.cwd : ''));
   rec.append(head);
+  // The project's crew member when the mission closed
+  const mark = crewMark(v, 32); if (mark) { mark.classList.add('big'); rec.append(mark); }
 
   const end = v.endedAt || null, w = v.warpCore || {};
   const dates = el('div', 'facts');
@@ -899,7 +1014,6 @@ function renderRecord() {
   db.collection('projects').orderBy('at').limit(100).onSnapshot(nb('projects'), fail);
   db.collection('pins').orderBy('at', 'desc').limit(300).onSnapshot(s => { S.pins = docs(s); refreshPins(); }, fail);
   window.claude?.use?.('assets').then(a => { assets = a; refreshPins(); }).catch(() => {});
-  db.collection('crew').orderBy('order').limit(50).onSnapshot(s => { S.crew = docs(s); renderCrew(S.crew); renderTree(); }, fail);
   db.collection('missions').orderBy('at', 'desc').limit(100).onSnapshot(s => renderMissions(docs(s)), fail);
 })();
 </script>

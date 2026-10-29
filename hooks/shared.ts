@@ -41,7 +41,7 @@ export function pixels(rows: readonly string[], palette: Record<string, string>,
 export const CREW_PALETTE: Record<string, string> = {
   s: '#f2c6a8', d: '#8a4a2a', a: '#f3e3c0', r: '#e0443e', y: '#e8a33a', g: '#b9b6c4', h: '#f6cf6a',
   k: '#1c1c22', v: '#8c8a96', b: '#3a2a22', t: '#4aa3c7', n: '#6b3e24', p: '#9b6bb5',
-  f: '#e88fb4', x: '#34343e', u: '#4caf50', q: '#e0a070',
+  f: '#e88fb4', x: '#34343e', u: '#4caf50', q: '#e0a070', o: '#2e7d32', z: '#f0a050',
 }
 
 // Same maps as the Starfleet Command hub, so a crew member looks the same everywhere
@@ -58,13 +58,25 @@ export const SPRITES: Record<string, { name: string; emoji: string; rows: string
   guinan: { name: 'Guinan', emoji: '🍺', rows: ['.ffffff.', 'ffffffff', '.dddddd.', '.dkddkd.', '..dddd..', '.ffffff.', 'ffffffff', 'ffffffff', '.ff..ff.'] },
   // Q in his court robe (black, gold chain of office)
   q: { name: 'Q', emoji: '⬛', rows: ['..nnnn..', '.nssssn.', '.skssks.', '.ssssss.', '..ssss..', '.xhhhhx.', 'xxxhhxxx', 'xxxxxxxx', '.xx..xx.'] },
-  quark: { name: 'Quark', emoji: '🟩', rows: ['..qqqq..', 'q.qqqq.q', 'qqkqqkqq', 'qqqqqqqq', '..qqqq..', '.uuuuuu.', 'uhuuuuhu', 'uuuuuuuu', '.kk..kk.'] },
+  // The Gorn took Quark's green square; a project that had Quark is moved to the Gorn
+  gorn: { name: 'Gorn', emoji: '🟩', rows: ['.uuuuuu.', 'uuuuuuuu', 'uhkuukhu', 'uuuuuuuu', '.uoooou.', 'uuuuuuuu', 'uouuuuou', 'uuuuuuuu', '.oo..oo.'] },
   crusher: { name: 'Crusher', emoji: '🟦', rows: ['.rrrrrr.', 'rrssssrr', 'rskssksr', '.ssssss.', '..ssss..', '.tttttt.', 'tkttttkt', 'tttttttt', '.kk..kk.'] },
+  // The cast past the squares: picture tags, like Guinan's ale
+  tasha: { name: 'Tasha', emoji: '⚡', rows: ['.hhhhhh.', 'hhsssshh', '.skssks.', '.ssssss.', '..ssss..', '.yyyyyy.', 'ykyyyyky', 'yyyyyyyy', '.kk..kk.'] },
+  wesley: { name: 'Wesley', emoji: '🩷', rows: ['..nnnn..', '.nssssn.', '.skssks.', '.ssssss.', '..ssss..', '.ffffff.', 'ffggggff', 'ffffffff', '.kk..kk.'] },
+  tribble: { name: 'Tribble', emoji: '🧶', rows: ['........', '........', '..dndn..', '.dndndn.', 'dndndndn', 'ndndndnd', 'dndndndn', '.ndndnd.', '..dndn..'] },
+  spot: { name: 'Spot', emoji: '🐈', rows: ['........', '.z....z.', '.zz..zz.', '.zzzzzz.', '.zkzzkz.', '.zzfzzz.', '.zyzyzz.', '.zzzzzz.', '.zz..zz.'] },
 }
+
+// Sprites the cast no longer has, and who took their place
+export const RETIRED_SPRITES: Record<string, string> = { quark: 'gorn' }
+
+// The most crew aboard at once: more won't fit on the viewscreen and the decks
+export const CREW_MAX = 11
 // Handed out in this order; neighbors in it never share a shirt color
 // Each crew member's tag, near their uniform color: shown on the crew decks and in front of
 // the name of every chat in that member's project, so a chat and its crew member match
-const TAG_EMOJI = /^(?:(?:\u{1F7E5}|\u{1F7E7}|\u{1F7E8}|\u{1F7E9}|\u{1F7E6}|\u{1F7EA}|\u{1F7EB}|\u2B1B|\u2B1C|\u{1F37A}|\u{1FA77}|\u{1F534}|\u{1F7E0}|\u{1F7E1}|\u{1F7E2}|\u{1F535}|\u{1F7E3}|\u{1F7E4}|\u26AB|\u26AA)\uFE0F?\s*)+/u
+const TAG_EMOJI = /^(?:(?:\u{1F7E5}|\u{1F7E7}|\u{1F7E8}|\u{1F7E9}|\u{1F7E6}|\u{1F7EA}|\u{1F7EB}|\u2B1B|\u2B1C|\u{1F37A}|\u{1FA77}|⚡|\u{1F9F6}|\u{1F408}|\u{1F534}|\u{1F7E0}|\u{1F7E1}|\u{1F7E2}|\u{1F535}|\u{1F7E3}|\u{1F7E4}|\u26AB|\u26AA)\uFE0F?\s*)+/u
 export function taggedTitle(title: string, emoji: string): string {
   return `${emoji} ${title.replace(TAG_EMOJI, '').trim() || 'New session'}`
 }
@@ -74,16 +86,17 @@ export function untaggedTitle(title: string): string {
   return TAG_EMOJI.test(title) ? title.replace(TAG_EMOJI, '').trim() || 'New session' : title
 }
 
-// The squares come first. Guinan's ale and Riker's circle come last: Riker is the backup, since his
-// red matches Picard's
-export const SPRITE_ORDER = ['picard', 'data', 'troi', 'geordi', 'crusher', 'worf', 'quark', 'seven', 'q', 'guinan', 'riker']
+// The whole cast, in the order newcomers get them: the squares first, then the picture tags, then
+// Riker as the backup, since his red matches Picard's. The captain can pick any of them in Manage crew
+export const SPRITE_ORDER = ['picard', 'data', 'troi', 'geordi', 'crusher', 'worf', 'gorn', 'seven', 'q', 'tasha', 'wesley', 'tribble', 'spot', 'guinan', 'riker']
 
 // Each crew member's one color, the color of their tag: their project's default planet is drawn in it,
 // so the chat's tag, the crew member and the viewscreen all match
 export const SPRITE_COLORS: Record<string, string> = {
   picard: '#e0443e', data: '#f08a2c', geordi: '#f2c94c', worf: '#8a4a2a',
   seven: '#e9e6f0', riker: '#e0443e', troi: '#9b6bb5', crusher: '#4aa3c7',
-  guinan: '#e88fb4', quark: '#4caf50', q: '#34343e',
+  guinan: '#e88fb4', gorn: '#4caf50', q: '#6a6a80',
+  tasha: '#f2d36b', wesley: '#f4a6c8', tribble: '#a0703c', spot: '#f0a050',
 }
 
 // The 8-bit placeholder ship, flying right. Swap these rows for your own art.
@@ -128,6 +141,27 @@ export function errText(err: unknown): string {
   return String(err instanceof Error ? err.message : err).slice(0, 160)
 }
 
+// Captain's log categories, in picker order; note is the default. The hub keeps its own copy in
+// assets/hub.html (CATS), which must match whenever these change
+export const LOG_CATEGORIES = [
+  { id: 'note', label: 'Note', emoji: '📝', color: '#cc99cc' },
+  { id: 'idea', label: 'Idea', emoji: '💡', color: '#ffcc33' },
+  { id: 'bug', label: 'Bug', emoji: '🐞', color: '#ff5555' },
+  { id: 'decision', label: 'Decision', emoji: '⚖️', color: '#9aa9ff' },
+  { id: 'todo', label: 'To-do', emoji: '☑️', color: '#ff9966' },
+] as const
+export type LogCategory = (typeof LOG_CATEGORIES)[number]['id']
+export function categoryOf(id: unknown) {
+  return LOG_CATEGORIES.find(c => c.id === id) ?? LOG_CATEGORIES[0]
+}
+// "/log idea: cache the scan" files an idea; a note with no known category word before a colon is a note
+export function splitCategory(typed: string): { category: LogCategory; text: string } {
+  const match = /^\s*(note|idea|bug|decision|to-?do)\s*:\s*/i.exec(typed)
+  if (!match) return { category: 'note', text: typed.trim() }
+  const word = match[1]!.toLowerCase().replace('-', '') as LogCategory
+  return { category: word, text: typed.slice(match[0].length).trim() }
+}
+
 // Rank by turns commanded, and the pips that show it
 export const RANKS = [
   { at: 0, name: 'Ensign', pips: 1 },
@@ -139,6 +173,39 @@ export const RANKS = [
 
 export function rankOf(turns: number) {
   return [...RANKS].reverse().find(r => turns >= r.at)!
+}
+
+// The rank name as a badge: a gold-edged ribbon with a star per pip. Admiral, the flag rank, gets a
+// laurel wreath and a brighter gold. Still art, so a redraw has nothing to restart
+// The drawing is 240 by 64; it is shown at 160 wide so it fits a narrow console
+export const BADGE_W = 160
+export const BADGE_H = 43
+const ART_W = 240
+const ART_H = 64
+export function rankBadgeSvg(rank: { name: string; pips: number }): string {
+  const isFlag = rank.pips >= 5
+  const [hi, lo] = isFlag ? ['#fff4c2', '#e8a800'] : ['#ffe08a', '#c08a10']
+  const mid = ART_W / 2
+  const stars = Array.from({ length: rank.pips }, (_, i) => {
+    const x = mid + (i - (rank.pips - 1) / 2) * 18
+    return `<path transform="translate(${x} 11) scale(.8)" d="M0-9 2.6-2.8 9-2.8 3.8 1.2 5.6 7.6 0 3.8-5.6 7.6-3.8 1.2-9-2.8-2.6-2.8Z" fill="url(#g)"/>`
+  }).join('')
+  // Leaves curving up each side, mirrored, for the flag rank's wreath
+  const leaves = isFlag ? [0, 1, 2, 3, 4].map(i => {
+    const y = 56 - i * 9
+    const x = 22 + i * 1.5 - (i === 0 || i === 4 ? 0 : 4)
+    return `<ellipse cx="${x}" cy="${y}" rx="8" ry="3.4" transform="rotate(${-55 + i * 22} ${x} ${y})" fill="url(#g)"/>`
+      + `<ellipse cx="${ART_W - x}" cy="${y}" rx="8" ry="3.4" transform="rotate(${55 - i * 22} ${ART_W - x} ${y})" fill="url(#g)"/>`
+  }).join('') : ''
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${ART_W} ${ART_H}">`
+    + `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${hi}"/><stop offset="1" stop-color="${lo}"/></linearGradient></defs>`
+    + leaves
+    // The ribbon, notched at both ends, with a thin gold rule inside its edge
+    + `<path d="M34 24H206L196 41 206 58H34L44 41Z" fill="#1c1508" stroke="url(#g)" stroke-width="2.5" stroke-linejoin="round"/>`
+    + `<path d="M41 28H199L191 41 199 54H41L49 41Z" fill="none" stroke="${lo}" stroke-opacity=".5" stroke-width="1"/>`
+    + stars
+    + `<text x="${mid}" y="47.5" text-anchor="middle" font-family="Antonio,Arial Narrow,sans-serif" font-size="18" font-weight="700" letter-spacing="2" fill="${hi}">${rank.name.toUpperCase().replace(/[<&>]/g, '')}</text>`
+    + '</svg>'
 }
 
 export function pipsSvg(pips: number): string {

@@ -143,9 +143,9 @@ async function translate($: EngineInterface, text: string) {
 
 // Called from register.tsx's own session.start, turn.start and turn.complete hooks
 export async function opsSessionStart($: EngineInterface) {
-  await $.command.register({ name: 'bridge', description: 'Open the live bridge: what every station is doing right now', immediate: true })
-  await $.command.register({ name: 'red-alert', description: 'Sound red alert (klaxon, voice and status line)', immediate: true })
-  await $.command.register({ name: 'translator', description: 'Open the universal translator', immediate: true })
+  await $.command.register({ name: 'bridge', description: 'Open the live bridge: what every station is doing right now', immediate: true }).catch(() => {})
+  await $.command.register({ name: 'red-alert', description: 'Sound red alert (klaxon, voice and status line)', immediate: true }).catch(() => {})
+  await $.command.register({ name: 'translator', description: 'Open the universal translator', immediate: true }).catch(() => {})
   // 13. An agent type Claude can dispatch: starfleet:away-team
   await $.agent.register({
     name: 'away-team',
@@ -170,7 +170,7 @@ export async function opsTurnComplete($: EngineInterface, agentId: string | unde
   await updateVoyage($, v => ({ ...v, warpMs: v.warpMs + durationMs, orders: v.orders + a.turnCalls }))
   // 15. A line in the transcript that the model never sees (captain mode only)
   if (await read($, isCaptainMode)) {
-    $.ui.log(`📓 Captain’s log, stardate ${stardate(await $.clock.now())}: mission complete in ${Math.round(durationMs / 1000)}s, ${a.turnCalls} station orders.`)
+    $.ui.log(`📓 Captain’s log, stardate ${stardate(await $.clock.now())}: mission complete in ${Math.round(durationMs / 1000)}s, ${a.turnCalls} tools used.`)
   }
 }
 
@@ -240,7 +240,7 @@ export function registerOps(on: On) {
         <Box flexDirection="row" columnGap={1}>
           <Text backgroundColor={alert.isOn ? '#ff3333' : '#ff9966'} color={LCARS.ink} bold> LIVE BRIDGE </Text>
           <Text color={seconds === null ? 'success' : 'warning'}>
-            {seconds === null ? '● Standing by' : `● Mission in progress · ${seconds}s · ${a.turnCalls} orders`}
+            {seconds === null ? '● Standing by' : `● Mission in progress · ${seconds}s · ${a.turnCalls} tools used`}
           </Text>
         </Box>
         <Box flexDirection="column" borderStyle="round" borderColor={LCARS.violet} paddingX={1}>
@@ -249,14 +249,14 @@ export function registerOps(on: On) {
         </Box>
         <Box flexDirection="column">
           <Text color={LCARS.lilac} bold>STATION LOG</Text>
-          {a.recent.length === 0 && <Text dimColor>No orders yet. Ask me to do something.</Text>}
+          {a.recent.length === 0 && <Text dimColor>No tools used yet. Ask me to do something.</Text>}
           {a.recent.map(c => (
             <Text dimColor={c.isDone && !c.isErrored} color={c.isErrored ? 'error' : undefined}>
               {c.isDone ? (c.isErrored ? '✗' : '✓') : '…'} {c.station.padEnd(20)} {c.tool}
             </Text>
           ))}
         </Box>
-        <Button key="red-alert" label={alert.isOn ? 'Stand down (r)' : 'Red alert (r)'} hotkey="r" onPress={() => toggleRedAlert($)} />
+        <Button key="red-alert" label={alert.isOn ? 'Stand down' : 'Red alert'} hotkey="r" onPress={() => toggleRedAlert($)} />
       </Box>
     )
   })

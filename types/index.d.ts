@@ -11,7 +11,8 @@ export type Activity = {
 
 export type RedAlert = { isOn: boolean; reason: string }
 
-export type LogEntry = { id: string; stardate: string; text: string; at: number; project: string }
+// category: one of LOG_CATEGORIES' ids; entries saved before categories read as note
+export type LogEntry = { id: string; stardate: string; text: string; at: number; project: string; category: string }
 
 export type Mission = {
   id: string; stardate: string; at: number; project: string; turns: number; redAlerts: number; handoffs: number

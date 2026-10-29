@@ -55,7 +55,9 @@ export async function hail($: EngineInterface) {
 // The console's top frame: an LCARS elbow sweeping into a bar, with the ship name and code
 export function lcarsFrameSvg(width: number, title: string, code: string, accent: string): string {
   const w = Math.max(240, width)
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} 58" width="${w}" height="58">
+  // Drawn larger than any pane inside a full-width Box, like the viewscreen, so the surface scales
+  // it to fit and the picture never changes with the pane's width
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} 58" width="${FILL_WIDTH}" height="${Math.round((FILL_WIDTH * 58) / w)}">
 <path d="M0 58 V22 Q0 0 22 0 H${w - 150} V20 H52 Q40 20 40 32 V58 Z" fill="${accent}"/>
 <rect x="${w - 144}" y="0" width="58" height="20" rx="0" fill="${LCARS.lilac}"/>
 <rect x="${w - 82}" y="0" width="82" height="20" rx="10" fill="${LCARS.blue}"/>
@@ -170,7 +172,15 @@ export function planetOf(id: string | undefined): PlanetSpec {
 // any pane, so the surface scales the whole picture down to fill its slot edge to edge
 export const FILL_WIDTH = 1600
 
-export function viewscreenSvg(project: string, tint: 'none' | 'red' | 'borg', planetId: string | undefined, now: number, color?: string): string {
+// A picture with every CSS animation taken out, for a pane that holds the keyboard. While it does,
+// every wheel tick redraws the pane and the desktop re-creates each picture; an animated one costs
+// enough that it has no height for a moment, the scroll is clamped and pulled back a row (the
+// shiver, proved with the scroll probes on 2026-10-29: the still viewscreen scrolled clean, the
+// animated one did not, keyed or not). Unfocused, a pane is not redrawn per tick, so the animations
+// stay. The keyframes are left in; without a property naming them they do nothing
+export const stillSvg = (svg: string) => svg.replace(/animation(?:-delay)?:[^;}"]*;?/g, '')
+
+export function viewscreenSvg(project: string, tint: 'none' | 'red' | 'borg', planetId: string | undefined, color?: string): string {
   // As wide as the ship's orbit needs and no wider, so the planet fills more of the frame
   const w = 400
   const h = 190
@@ -179,16 +189,15 @@ export function viewscreenSvg(project: string, tint: 'none' | 'red' | 'borg', pl
   const sky = tint === 'red' ? '#1d0707' : tint === 'borg' ? '#06140a' : '#05060f'
   const cx = Math.round(w / 2)
   const cy = 82
-  // Every redraw loads the picture afresh and restarts its animations, so each animation starts as
-  // far along its loop as the clock says: a redraw then picks up where the last one was
-  const along = (loopMs: number, delayS = 0) => `${Number((delayS - (now % loopMs) / 1000).toFixed(3))}s`
+  // Nothing here reads the clock: a source that changes between redraws is reloaded, has no
+  // height for a moment and pulls the scroll back a row (the shiver). Fixed delays only
   let stars = ''
   let s = hashOf(project + 'stars')
   for (let i = 0; i < Math.round(w / 7); i++) {
     s = (s * 1103515245 + 12345) % 2147483648
     const x = s % w
     s = (s * 1103515245 + 12345) % 2147483648
-    stars += `<rect class="tw" style="animation-delay:${along(3000, (s % 30) / 10)}" x="${x}" y="${s % h}" width="${s % 9 === 0 ? 2 : 1}" height="${s % 9 === 0 ? 2 : 1}" fill="#dfe6ff"/>`
+    stars += `<rect class="tw" style="animation-delay:${(s % 30) / 10}s" x="${x}" y="${s % h}" width="${s % 9 === 0 ? 2 : 1}" height="${s % 9 === 0 ? 2 : 1}" fill="#dfe6ff"/>`
   }
   const ship = pixels(SHIP_ROWS, SHIP_PALETTE, 2)
   const art = spec.draw(cx, cy, 54, hue, color)
@@ -204,10 +213,9 @@ ${art.defs}</defs>
 .tw{animation:tw 3s ease-in-out infinite}
 @keyframes glow{0%,100%{opacity:.7}50%{opacity:1}}
 @keyframes spark{0%,70%,100%{opacity:.3}80%{opacity:1}}
-.ship{animation:orbit 16s linear infinite;animation-delay:${along(16000)}}
-svg{--g:${along(2400)}}
-.glow{animation:glow 2.4s ease-in-out infinite;animation-delay:var(--g)}
-.spark{animation:spark 2.4s steps(3) infinite;animation-delay:var(--g)}
+.ship{animation:orbit 16s linear infinite}
+.glow{animation:glow 2.4s ease-in-out infinite}
+.spark{animation:spark 2.4s steps(3) infinite}
 @media (prefers-reduced-motion:reduce){.tw,.ship,.glow,.spark{animation:none}.ship{transform:translate(${cx - 150}px,${cy - 6}px)}}
 </style>
 <g clip-path="url(#vs)">
@@ -299,10 +307,14 @@ export function commsBadgeSvg(isPaused = false): string {
 .halo{animation:halo 3s steps(3) infinite}
 .cur{animation:blink 1s steps(1) infinite}
 ${isPaused ? '.badge,.wv,.gl,.halo,.cur{animation:none}.wv,.gl{opacity:0}' : '@media (prefers-reduced-motion:reduce){.badge,.wv,.gl,.halo,.cur{animation:none}.wv,.gl{opacity:0}}'}
+.off{display:none}
+svg:hover :is(.badge,.wv,.gl,.halo,.cur){animation-play-state:paused}
+svg:hover .on{display:none}
+svg:hover .off{display:inline}
 </style>
 <ellipse class="halo" cx="${cx}" cy="${cy}" rx="120" ry="70" fill="${LCARS.gold}" opacity=".08"/>
 ${waves}
 <g class="badge">${pixels(BADGE_ROWS, BADGE_PALETTE, px, dx, dy)}${glint(12, 1, 0.1)}${glint(10, 7, 0.3)}${glint(1, 11, 0.5)}</g>
-<text x="${cx}" y="${h - 14}" text-anchor="middle" font-family="Antonio,'Arial Narrow',sans-serif" font-size="14" font-weight="700" letter-spacing="3" fill="${LCARS.peach}">STARFLEET COMMS<tspan class="cur" fill="${LCARS.gold}"> ▮</tspan></text>
+<text x="${cx}" y="${h - 14}" text-anchor="middle" font-family="Antonio,'Arial Narrow',sans-serif" font-size="14" font-weight="700" letter-spacing="3" fill="${LCARS.peach}"><tspan class="on">STARFLEET COMMS<tspan class="cur" fill="${LCARS.gold}"> ▮</tspan></tspan><tspan class="off">COMMS PAUSED</tspan></text>
 </svg>`
 }

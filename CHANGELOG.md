@@ -9,6 +9,10 @@
 - Worktree chats count as their project's crew member. A failing test run in one puts the project in sickbay.
 - From 70% context the warp core asks once per tier whether the work is mid-task, and recommends compact or eject.
 - Demo GIF and interactive demo link in the README.
+- **Manage crew** opens its own tab: every project with its sprite, then the bench. Swap sprites with ◀ ▶ and Save, and the chat tags, decks and planets follow.
+- **Captain's log** opens its own tab with the cursor in the field, and notes can be filed as a category like 🐞 Bug. Categories fold, and stay folded after a reload. The hub has the same filter bar and a colored pill per entry.
+- `CUSTOMIZE.md`: a guide to each part of the console and what to ask Claude to change it.
+- A Known issues section in the README.
 
 ### Changed
 - Stardates read month and day, then the year (1028.26). Older entries convert on their own.
@@ -21,6 +25,7 @@
 ### Fixed
 - Shields reads a here-document as text when only text readers like `cat` or `tee` take it, so writing a file that mentions a risky command is no longer blocked. Anything else on its line (a shell, `eval`, `.`, a wrapper, a pipe carrying on) still has its body judged. A `<<` in arithmetic or `${…}` is never a here-document.
 - The red alert banner sits at its own height and fits its text.
+- The viewscreen holds still while the console has the keyboard, which cuts the scroll shiver. Some shiver after pressing a button remains (see Known issues).
 - The service record only counts up, and an acknowledged briefing stays gone after a reload.
 - Console drawings fit a narrow pane, and a full deck of crew is never cut off.
 

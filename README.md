@@ -45,7 +45,21 @@ If you think in pictures, this is for you. Instead of scrolling back through cha
 
 Press **About** (`a`) in the console for a short guide to every part and what it connects to.
 
+Want to change how it looks or acts? [CUSTOMIZE.md](CUSTOMIZE.md) walks through each part and what to ask Claude to make it your own.
+
 Other commands: `/bridge`, `/red-alert`, `/translator`, `/captain-mode`, `/service-record`, `/starship`, `/warp-core`.
+
+## Known issues
+
+**The console shivers when you scroll after pressing one of its buttons.** Seen in the Claude desktop app 4.29.0 with Claude Code 2.1.312.
+
+1. Open the console taller than its dock, so it scrolls.
+2. Press any console button.
+3. Scroll the console, especially toward the bottom.
+
+Each scroll move gets pulled back about 10 ms later, so the console shivers in place. Pressing Esc stops it right away, and a console where nothing's been pressed scrolls fine.
+
+What we know so far: it looks like the app keeps the pressed button in view on every redraw, which fights your scroll. Turning off the console's once-a-second redraw didn't help, and neither did keeping every picture the same between redraws. Holding the viewscreen still while the console has focus helped. A mod has no way to hand the keyboard back to the prompt after a press, which would likely fix it. If you find a fix or a workaround, please open an issue.
 
 ## Privacy
 

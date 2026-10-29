@@ -1,4 +1,5 @@
 import { atom, read, update } from 'claude-code'
+import { isBandOn } from './prefs'
 import type { EngineInterface, On, RenderElement } from 'claude-code'
 
 import { addLogEntry, bumpMission } from './log'
@@ -219,8 +220,8 @@ async function measure($: EngineInterface, percent: number | undefined, tokens: 
 }
 
 export async function coreSessionStart($: EngineInterface) {
-  await $.command.register({ name: 'warp-core', description: 'Open the warp core: context, activity, and Eject core for a handoff document', immediate: true })
-  await $.command.register({ name: 'eject-core', description: 'Eject the warp core: Claude writes a handoff and continues the project in a new chat', immediate: true })
+  await $.command.register({ name: 'warp-core', description: 'Open the warp core: context, activity, and Eject core for a handoff document', immediate: true }).catch(() => {})
+  await $.command.register({ name: 'eject-core', description: 'Eject the warp core: Claude writes a handoff and continues the project in a new chat', immediate: true }).catch(() => {})
   const usage = await $.session.usage()
   await measure($, usage.context.percent, usage.context.tokens, usage.context.window)
 }
@@ -272,20 +273,20 @@ export function registerCore(on: On) {
             <Text color={tier >= 2 ? 'success' : undefined} wrap="truncate">{tier ? `🟩 ${TIER_TEXT[tier]}` : 'No Borg on sensors'}</Text>
             {answer === 'ask' && <Text bold>Still mid-task, or done?</Text>}
             {answer === 'ask' && <Box flexDirection="row" columnGap={1}>
-              <Button key="mid" label="Mid-task (m)" hotkey="m" onPress={() => answerAdvice($, 'mid')} />
-              <Button key="done" label="Done (d)" hotkey="d" onPress={() => answerAdvice($, 'done')} />
+              <Button key="mid" label="Mid-task" hotkey="t" onPress={() => answerAdvice($, 'mid')} />
+              <Button key="done" label="Done" hotkey="d" onPress={() => answerAdvice($, 'done')} />
             </Box>}
             {(answer === 'mid' || answer === 'done') && <Text color="success" bold>{ADVICE_TEXT[answer]}</Text>}
-            {isEjecting && <Text color="error" bold>CORE EJECTED · handoff in progress</Text>}
+            {isEjecting && <Text color="error" bold>CORE EJECTED · writing the handoff</Text>}
             <Button
               key="eject"
-              label={isArmed ? 'Confirm eject (e)' : 'Eject core (e)'}
+              label={isArmed ? 'Confirm eject' : 'Eject core'}
               hotkey="e"
               variant={isArmed ? 'primary' : 'secondary'}
               onPress={() => ejectCore($)}
             />
             <Text dimColor italic>Eject writes a handoff and continues in a new chat. The project stays open.</Text>
-            {isCompactShown && <Button key="compact" label="Compact memory banks (c)" hotkey="c" onPress={async () => {
+            {isCompactShown && <Button key="compact" label="Compact memory" hotkey="m" onPress={async () => {
               $.ui.toast('🟩 Compacting before assimilation…')
               await $.session.compact()
             }} />}
@@ -299,7 +300,7 @@ export function registerCore(on: On) {
   // red alert or the Borg, and nothing otherwise. Other plugins' bands and the engine's own
   // always show beneath it
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey) return next(e)
+    if (e.props.hasSurvey || !(await isBandOn($))) return next(e)
     const el = $.ui.resolve(e)
     const beside = async (mine: RenderElement) => {
       const theirs = await next(e)
@@ -314,7 +315,9 @@ export function registerCore(on: On) {
     if (e.props.isWorking) {
       const tint = alert.isOn ? 'red' : tier >= 2 ? 'borg' : 'none'
       return beside('Svg' in el
-        ? <el.Svg source={glideSvg(width, tint)} alt="An 8-bit starship gliding through stars" isInteractive />
+        // The frame gets the picture's own height: left to itself an interactive frame takes a tall
+        // default and leaves dead space above and below the strip
+        ? <el.Svg source={glideSvg(width, tint)} alt="An 8-bit starship gliding through stars" height={40} isInteractive />
         : <Text color={LCARS.violet}>{'  ·   ✦      ·  >=<   ·    ✦  '}</Text>)
     }
     if (alert.isOn) {
@@ -336,7 +339,7 @@ export function registerCore(on: On) {
           {answer === 'ask' && <Button key="band-mid" label="Mid-task" plain onPress={() => answerAdvice($, 'mid')} />}
           {answer === 'ask' && <Button key="band-done" label="Done" plain onPress={() => answerAdvice($, 'done')} />}
           {answer === 'mid' && <Text bold>· Recommended:</Text>}
-          {answer === 'mid' && <Button key="band-compact" label="Compact" plain onPress={() => $.session.compact()} />}
+          {answer === 'mid' && <Button key="band-compact" label="Compact memory" plain onPress={() => $.session.compact()} />}
           {answer === 'done' && <Text bold>· Recommended:</Text>}
           {answer === 'done' && <Button key="band-eject" label="Eject core" plain onPress={() => ejectCore($)} />}
         </Box>
