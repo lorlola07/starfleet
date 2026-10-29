@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.11
+
+### Fixed
+- Claude can only take a folder off the crew if it's already a crew folder. Before, taking an unknown folder off put it on the hidden list, which let adding it next skip your question.
+
 ## 0.4.10
 
 ### Fixed

@@ -484,13 +484,20 @@ async function cloudPage($: EngineInterface, el: El, now: number): Promise<Rende
 async function setProjectByName($: EngineInterface, project: string, isAboard: boolean): Promise<string> {
   const home = (await $.env.get('HOME')) ?? ''
   const typed = project.trim().replace(/^~(?=\/|$)/, home).replace(/\/+$/, '')
-  const known = [...new Set([...roster.map(c => c.path), ...(await hiddenProjects($)), ...(await pathList($, 'crewAdded')), ...(await pathList($, 'crewPruned')), ...spare, projectOf(await $.session.cwd())!])]
+  // Folders the captain vouched for: their own chats' folders, ones they added or pruned in the crew
+  // editor, and this chat's. The hidden list isn't one of them, since this tool writes it
+  const trusted = [...new Set([...roster.map(c => c.path), ...(await pathList($, 'crewAdded')), ...(await pathList($, 'crewPruned')), ...spare, projectOf(await $.session.cwd())!])]
+  const hidden = await hiddenProjects($)
+  const known = [...new Set([...trusted, ...hidden])]
   const path = typed.startsWith('/') ? typed : known.find(p => basename(p).toLowerCase() === typed.toLowerCase())
   if (!path || (typed.startsWith('/') && !(await $.fs.exists(path)))) return `No project folder named ${project}. Give its folder name as the crew decks show it, or its full path.`
   const name = basename(path)
-  // A folder the mod hasn't seen comes aboard only on the captain's word: the crew scan runs git in
-  // every crew folder, and the path came from Claude, which a page or file could have steered
-  if (isAboard && !known.includes(path)) {
+  // Only a crew folder can be taken off: otherwise taking an unknown folder off would make it known,
+  // and slip it past the question below
+  if (!isAboard && !known.includes(path)) return `${name} isn't on the crew, so there's nothing to take off.`
+  // A folder the captain hasn't vouched for comes aboard only on their word: the crew scan runs git
+  // in every crew folder, and the path came from Claude, which a page or file could have steered
+  if (isAboard && !trusted.includes(path)) {
     let answer: string | undefined
     try {
       answer = await $.ui.ask(`Add the folder ${path} to the crew? Starfleet will check it with git.`, { header: 'Crew', options: ['Keep it off', 'Add folder'] })

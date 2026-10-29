@@ -762,6 +762,18 @@ test('Claude adds a folder the mod has never seen only after the captain says so
   await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: 'MOD', aboard: false })
   await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: 'MOD', aboard: true })
   expect(asked.length).toBe(2)
+  // Taking an unknown folder off first can't sneak it past the question
+  answer = 'Keep it off'
+  const off = await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: '/Users/cap/cloned/other', aboard: false }) as { result: string }
+  expect(off.result).toContain("isn't on the crew")
+  expect((store.crewHidden as string[] | undefined) ?? []).not.toContain('/Users/cap/cloned/other')
+  await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: '/Users/cap/cloned/other', aboard: true })
+  expect(asked.length).toBe(3)
+  expect(store.crewAdded as string[]).not.toContain('/Users/cap/cloned/other')
+  // Nor can a path already on the hidden list from before
+  store.crewHidden = [...((store.crewHidden as string[] | undefined) ?? []), '/Users/cap/cloned/planted']
+  await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: '/Users/cap/cloned/planted', aboard: true })
+  expect(asked.length).toBe(4)
   // Every git call the crew scan makes switches off a repo's fsmonitor program
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   const gits = argvs.filter(a => a[0] === 'git')
