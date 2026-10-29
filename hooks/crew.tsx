@@ -488,6 +488,17 @@ async function setProjectByName($: EngineInterface, project: string, isAboard: b
   const path = typed.startsWith('/') ? typed : known.find(p => basename(p).toLowerCase() === typed.toLowerCase())
   if (!path || (typed.startsWith('/') && !(await $.fs.exists(path)))) return `No project folder named ${project}. Give its folder name as the crew decks show it, or its full path.`
   const name = basename(path)
+  // A folder the mod hasn't seen comes aboard only on the captain's word: the crew scan runs git in
+  // every crew folder, and the path came from Claude, which a page or file could have steered
+  if (isAboard && !known.includes(path)) {
+    let answer: string | undefined
+    try {
+      answer = await $.ui.ask(`Add the folder ${path} to the crew? Starfleet will check it with git.`, { header: 'Crew', options: ['Keep it off', 'Add folder'] })
+    } catch {
+      answer = undefined
+    }
+    if (answer !== 'Add folder') return `The captain kept ${name} off the crew. Don't ask again unless they bring it up.`
+  }
   if (!isAboard) {
     await setAboard($, path, false)
     return `${name} left the crew: off the crew decks, the hub roster and the sidebar emoji. The rest of the mod still runs there.`
@@ -639,7 +650,8 @@ async function runScan($: EngineInterface) {
   // Uncommitted changes, checked for every project at once
   const changeCounts = await Promise.all(aboardLocal.map(async ({ path }) => {
     try {
-      const git = await $.process.run(['git', '-C', path, 'status', '--porcelain'], { timeoutMs: 5000 })
+      // core.fsmonitor off: a repo's own config could otherwise name a program for git status to run
+      const git = await $.process.run(['git', '-c', 'core.fsmonitor=false', '-C', path, 'status', '--porcelain'], { timeoutMs: 5000 })
       return git.exitCode === 0 ? git.stdout.split('\n').filter(Boolean).length : 0
     } catch {
       return 0 // not a git repository, or git missing: no engineering work to show

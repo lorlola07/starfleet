@@ -737,6 +737,38 @@ test('added folders never push the crew past 11 aboard, and adding a 12th is ref
   expect((store.crewAdded as string[]).length).toBe(full)
 })
 
+test('Claude adds a folder the mod has never seen only after the captain says so, and git runs with fsmonitor off', async ($, on) => {
+  const argvs: string[][] = []
+  const store = engine(on, (_, e) => { argvs.push(e.argv); return { value: { exitCode: 0, stdout: '', stderr: '' } } })
+  let answer = 'Keep it off'
+  const asked: string[] = []
+  on('tool.call', (_: unknown, e: { tool: string; questions?: { question: string }[] }) => {
+    if (e.tool !== 'AskUserQuestion') return { result: 'ok' }
+    const question = e.questions![0]!.question
+    asked.push(question)
+    return { result: { questions: e.questions, answers: { [question]: answer } } }
+  })
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  // Keep it off (the default) adds nothing
+  const kept = await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: '/Users/cap/cloned/stranger', aboard: true }) as { result: string }
+  expect(asked[0]).toContain('/Users/cap/cloned/stranger')
+  expect(kept.result).toContain('kept stranger off')
+  expect((store.crewAdded as string[] | undefined) ?? []).not.toContain('/Users/cap/cloned/stranger')
+  // Add folder brings it aboard
+  answer = 'Add folder'
+  await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: '/Users/cap/cloned/stranger', aboard: true })
+  expect(store.crewAdded as string[]).toContain('/Users/cap/cloned/stranger')
+  // A folder the mod already knows comes back with no question
+  await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: 'MOD', aboard: false })
+  await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: 'MOD', aboard: true })
+  expect(asked.length).toBe(2)
+  // Every git call the crew scan makes switches off a repo's fsmonitor program
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
+  const gits = argvs.filter(a => a[0] === 'git')
+  expect(gits.length).toBeGreaterThan(0)
+  for (const argv of gits) expect(argv.slice(0, 3)).toEqual(['git', '-c', 'core.fsmonitor=false'])
+})
+
 test('an added folder that no longer exists leaves its crew slot free', async ($, on) => {
   const dir = (name: string) => ({ name, kind: 'dir', size: 0, mtimeMs: Date.now(), isLink: false })
   const store = engine(on, undefined, undefined, {

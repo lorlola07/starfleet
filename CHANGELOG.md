@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.10
+
+### Fixed
+- When Claude asks to add a folder the mod has never seen to the crew, you're asked first, with Keep it off as the default. The crew scan runs git in every crew folder, so a folder only comes aboard on your word.
+- The crew scan runs `git status` with `core.fsmonitor` switched off, so a repo's own settings can't make git start a program.
+
 ## 0.4.9
 
 ### Added
