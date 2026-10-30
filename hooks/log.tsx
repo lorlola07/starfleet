@@ -4,6 +4,7 @@ import type { CrewMember, LogEntry, Mission } from '../types'
 import { scanCrew } from './crew'
 import { HUB_TEMPLATE, LOG_CATEGORIES, SPRITES, basename, categoryOf, isHubUrl, projectOf, serial, splitCategory, stardate } from './shared'
 import type { LogCategory } from './shared'
+import { projectFor, projectName, readProjectMap, reportId, withProjects } from './projects'
 import { HEAD_COLOR, LCARS } from './theme'
 import { readVoyage } from './voyage'
 
@@ -102,7 +103,7 @@ export async function readRecentLogs($: EngineInterface): Promise<LogEntry[]> {
   const saved = await $.store.get('logSessions')
   const ids = Array.isArray(saved) ? (saved as string[]) : []
   const logs = await Promise.all(ids.map(async id => parseLog(await $.store.get(`log:${id}`))))
-  return [...logs.flat(), ...parseLog(await $.store.get(ARCHIVE_KEY))].sort((a, b) => b.at - a.at)
+  return withProjects($, [...logs.flat(), ...parseLog(await $.store.get(ARCHIVE_KEY))].sort((a, b) => b.at - a.at))
 }
 
 function parseLog(saved: unknown): LogEntry[] {
@@ -180,7 +181,7 @@ async function hubVersion($: EngineInterface, hub: string, collection: string, i
 // only if that fails. With no hub yet it is held, and goes when the hub is set
 export async function sendEntryToHub($: EngineInterface, entry: LogEntry) {
   const hub = await hubUrl($)
-  const doc = { stardate: entry.stardate, text: entry.text, at: entry.at, project: entry.project, category: entry.category, session: await $.session.id() }
+  const doc = { stardate: entry.stardate, text: entry.text, at: entry.at, project: projectFor(await readProjectMap($), entry.project), category: entry.category, session: await $.session.id() }
   if (!hub) {
     await pendingLock(async () => $.store.set('hubPending', [...(await readPending($)).filter(p => p.id !== entry.id), { id: entry.id, doc }].slice(-PENDING_MAX)))
     $.ui.toast('📓 Logged. It goes to your hub once you have one: press Set up my hub in the console.')
@@ -383,6 +384,8 @@ export async function syncPrompt($: EngineInterface): Promise<string> {
 
 // The closure report: a full sync, then this session's mission finished off so the chat can be archived
 export async function closurePrompt($: EngineInterface, now: number): Promise<string> {
+  const project = await projectName($, await $.session.cwd())
+  const report = JSON.stringify(reportId(project))
   return [
     (await syncPrompt($)).replace(/Reply in one line with what was synced\.$/, ''),
     '',
@@ -394,7 +397,16 @@ export async function closurePrompt($: EngineInterface, now: number): Promise<st
     '  openItems: an array of 0 to 5 short strings, what is unfinished, unverified or broken (empty if nothing),',
     '  nextStep: one line, the first thing to do when work resumes, or "None" ',
     '}. Make summary, report and steps final, covering the whole session, unless the doc has editedAt: then keep the captain\'s.',
-    'Reply in two lines: the outcome and summary, then "Mission closed. Safe to archive this chat."',
+    // Chats wander: work for another project stays out of this mission and is filed with that project, with the captain's OK
+    'Before writing closure, sort it by project. Label every delivered and openItems string with the project it belongs to, using the project names in the records (log, crew and missions) and the hub\'s collections "projects", "notes" and "folders".',
+    // The overview check runs first, so its question can share the one AskUserQuestion with the sorting
+    `Also before writing anything, get the doc ${report} in the hub collection "reports" (the overview of project ${JSON.stringify(project)}). If it has an overview but no writtenAt, or an updatedAt later than its writtenAt, the captain edited it by hand in the hub since the last close.`,
+    'If any item belongs to a project other than this mission\'s, ask the captain once with AskUserQuestion (multiSelect), one option per such item, labeled like "Project B: Formatting bar in the post editor", before writing anything. Move only the items the captain ticks; nothing moves without a tick.',
+    'Ticked items leave this mission\'s closure. For each other project that got items, add one doc to the hub collection "notes": { title: "From mission: <this mission\'s summary> · SD <stardate>", body: "Delivered:\\n- item\\n\\nOpen items:\\n- item" (leave out a heading with nothing under it), project: that project\'s name, folder: "", at, updated and order all = now }. Touch no other notes. If nothing belongs elsewhere, ask nothing about sorting.',
+    // Close mission keeps the project's overview current; the captain's own words are replaced only with a yes
+    `If the overview was edited by hand, put one more question in that same AskUserQuestion call (or ask it alone if there is no sorting question): "Replace your edited overview of ${project}?", options "Keep my overview" first and "Replace it". Keep leaves the doc as it is.`,
+    `Unless the captain kept it, refresh the overview last. List collection "missions" and take every doc whose project is ${JSON.stringify(project)}, skipping ids in "missionDeleted", with this mission as just written. Set reports doc ${report} to { project: ${JSON.stringify(project)}, overview, updatedAt: ${now}, writtenAt: ${now} }. overview: 2 to 4 plain sentences covering all those chapters in order (what the project is for, what works now), ending with a sentence on what is still open, from the newest closure\'s openItems ("Nothing is open." if none). Touch no other reports doc.`,
+    'Reply in short lines: the outcome and summary, then "Mission closed. Safe to archive this chat." If items were filed elsewhere, add a line naming each project and how many items went there. Add a last line: "Overview refreshed." or "Overview kept as you wrote it."',
   ].join('\n')
 }
 
@@ -406,7 +418,7 @@ export async function recordsJson($: EngineInterface): Promise<string> {
     await scanCrew($).catch(() => {})
     crew = ((await $.store.get('crew')) ?? []) as CrewMember[]
   }
-  return JSON.stringify({ hubUrl: (await hubUrl($)) ?? null, sessionId: await $.session.id(), log: await readLog($), crew, missions: await missionRecords($) }, null, 1)
+  return JSON.stringify({ hubUrl: (await hubUrl($)) ?? null, sessionId: await $.session.id(), log: await withProjects($, await readLog($)), crew, missions: await missionRecords($) }, null, 1)
 }
 
 // This session's missions with the voyage folded in: the warp core report and the files changed
@@ -420,6 +432,8 @@ async function missionRecords($: EngineInterface) {
   }
   return Promise.all((await readMissions($)).map(async m => ({
     ...m,
+    // Named through the project map when read, so a map change relabels old missions too
+    project: m.cwd ? await projectName($, m.cwd) : m.project,
     ...crewOf(m),
     ...pluginsOf(m),
     warpCore: { warpMs: v.warpMs, orders: v.orders, scans: v.scans, greenBuilds: v.greenBuilds, commits: v.commits, lastBuild: v.lastBuild, peakContext: m.peakContext ?? null, onDutyMs: (m.endedAt ?? m.at) - Math.min(m.at, v.startedAt) },
@@ -517,7 +531,7 @@ export function registerLog(on: On) {
       const saved = await $.store.get('logFolded')
       folded = saved && typeof saved === 'object' ? (saved as Partial<Record<LogCategory, boolean>>) : {}
     }
-    const all = await readLog($)
+    const all = await withProjects($, await readLog($))
     const hub = await hubUrl($)
     const fold = async (id: LogCategory) => {
       folded = { ...folded, [id]: !folded?.[id] }

@@ -2,9 +2,10 @@ import { expect, test } from 'claude-code/testing'
 import { TEST_OR_BUILD, stardate } from '../hooks/shared'
 import { courseOf } from '../hooks/voyage'
 import { CREW_MAX, SPRITES, SPRITE_COLORS, SPRITE_ORDER, BADGE_W, LOG_CATEGORIES, rankBadgeSvg, splitCategory, rankOf, taggedTitle } from '../hooks/shared'
-import { onDark, stillSvg, viewscreenSvg } from '../hooks/theme'
+import { onDark, viewscreenSvg } from '../hooks/theme'
 import { crewSvg } from '../hooks/crew'
 import { isNewer } from '../hooks/update'
+import { projectFor, reportId } from '../hooks/projects'
 
 // The test runtime has timers; the mod's own types leave them out
 // $.tool.call through a plain signature: inferring each tool's input type is too deep for tsc
@@ -224,7 +225,42 @@ test('close mission sends a closure report that marks the mission closed for arc
   expect(closure).toContain('openItems')
   expect(closure).toContain('starfleet_records')
   expect(closure).toContain('Safe to archive')
+  // Work for another project is sorted out with the captain's OK and filed as a note on that project
+  expect(closure).toContain('sort it by project')
+  expect(closure).toContain('AskUserQuestion')
+  expect(closure).toContain('nothing moves without a tick')
+  expect(closure).toContain('collection "notes"')
   await ui.unmount()
+})
+
+test('close mission refreshes the project overview, asking first only if the captain edited it', async ($, on) => {
+  const store = engine(on, undefined, undefined, { cwd: '/Users/cap/harbor' })
+  store.projectMap = { harbor: 'Project Harbor' }
+  on('audio.play', () => ({ value: undefined }))
+  const sent: string[] = []
+  on('prompt.submit', (_: unknown, e: { text: string }) => { sent.push(e.text); return { text: e.text } })
+  await $.session.start({ cwd: '/Users/cap/harbor', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
+  await ui.press({ key: 'closure' })
+  await new Promise(done => setTimeout(done, 20))
+  await ui.unmount()
+  const closure = sent.find(t => t.includes('CLOSURE REPORT'))!
+  // The project comes through the map, and its doc id is the hub's slug of it
+  expect(closure).toContain('"project-harbor" in the hub collection "reports"')
+  expect(closure).toContain('every doc whose project is "Project Harbor"')
+  // A hub Save drops writtenAt, so a missing or older stamp means the captain's words: ask, keep first
+  expect(closure).toContain('no writtenAt')
+  expect(closure).toContain('"Keep my overview" first')
+  expect(closure).toContain('same AskUserQuestion call')
+  expect(closure).toMatch(/writtenAt: \d+/)
+  expect(closure).toContain('Overview refreshed.')
+})
+
+test('a report id is the hub\'s slug of the project name', () => {
+  expect(reportId('Project Harbor')).toBe('project-harbor')
+  expect(reportId('Starfleet mod')).toBe('starfleet-mod')
+  expect(reportId('Voyager')).toBe('voyager')
+  expect(reportId('')).toBe('mission')
 })
 
 test('a project that leaves the decks keeps its sprite until a newcomer needs it', async ($, on) => {
@@ -613,6 +649,7 @@ test('log entries carry a category: picked in the log tab, filtered there, and s
   // The tab: Note is picked to start; a pick files the next entry, then it goes back to Note
   const tab = await $.ui.mount(pane('starfleet-log', 'desktop'))
   expect((await tab.find({ type: 'Button', key: 'cat-note' }))?.props.variant).toBe('primary')
+  expect((await tab.find({ type: 'Button', key: 'cat-bug' }))?.props.variant).toBe('secondary')
   await tab.press({ key: 'cat-bug' })
   expect((await tab.find({ type: 'Button', key: 'cat-bug' }))?.props.variant).toBe('primary')
   await $.ui.input({ plugin: 'starfleet', key: 'log-0', text: 'console shivers' })
@@ -1002,7 +1039,9 @@ test('console drawings fit a narrow pane, and a full deck of crew is never cut o
   const buttons = await ui.findAll({ type: 'Button' })
   expect(buttons.some(b => b.props.key === 'closure' || (b as { key?: string }).key === 'closure')).toBe(true)
   const tree = JSON.stringify(await $.ui.render(narrow))
-  expect(tree).toContain('"50%"')
+  // Two columns, the first wider so "Captain mode: off" fits whole
+  expect(tree).toContain('"58%"')
+  expect(tree).toContain('"42%"')
   expect(tree).not.toMatch(/\d--\d/)
   // The viewscreen claims more width than any pane, so it fills its slot; its arrow has no hotkey
   const screen = (await ui.findAll({ type: 'Svg' })).find(x => String(x.props.alt).startsWith('Viewscreen'))
@@ -1084,6 +1123,18 @@ test('every pane sits on the dark LCARS background with its own text colors, so 
   expect(quiet!.props).toEqual({ color: '#8c8a96' })
   expect(peach!.children![1]!.props).toBeUndefined()
   expect(pill!.props).toEqual({ backgroundColor: '#ffcc99', color: '#000000' })
+
+  // On the desktop a plain button turns secondary, not white; one that asked for primary keeps it
+  const buttons = onDark({ type: 'Box', children: [
+    { type: 'Button', props: { label: 'Focus', plain: true } },
+    { type: 'Button', props: { label: 'Off', variant: 'secondary' } },
+    { type: 'Button', props: { label: 'Picked', variant: 'primary' } },
+  ] }, true) as { children: { children: { props: Record<string, unknown> }[] }[] }
+  expect(buttons.children[0]!.children.map(b => b.props)).toEqual([
+    { label: 'Focus', variant: 'secondary' },
+    { label: 'Off', variant: 'secondary' },
+    { label: 'Picked', variant: 'primary' },
+  ])
 })
 
 test('every heading uses the one heading color, and the viewscreen keeps a roomy wide canvas', async ($, on) => {
@@ -1122,48 +1173,12 @@ test('every heading uses the one heading color, and the viewscreen keeps a roomy
   expect(svg).toContain('viewBox="0 0 400 190"')
 })
 
-test('review: a focused console keeps its pictures the same between redraws, and an unfocused one carries the orbit on with the clock', async ($, on) => {
-  // Focused, a picture whose source changes between redraws is reloaded and has no height for a
-  // moment, which pulls the scroll back a row (the shiver), so it holds still and never changes.
-  // Unfocused, the desktop still reloads it on every redraw (once a second while Claude works), so
-  // the orbit starts where the clock says instead of snapping back to the left edge each second
-  engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
-  const p = pane('starfleet-console', 'desktop')
-  const draw = async (isFocused: boolean) => {
-    const ui = await $.ui.mount({ ...p, props: { ...p.props, isFocused } })
-    const pics = (await ui.findAll({ type: 'Svg' })).map(s => String(s.props.source))
-    const text = JSON.stringify(await ui.findAll({ type: 'Text' }), (k, v) => (k === 'parent' ? undefined : v))
-    await ui.unmount()
-    return { pics, text }
-  }
-  const orbit = (pics: string[]) => pics.find(svg => svg.includes('STANDARD ORBIT'))?.match(/\.ship\{[^}]*\}/)?.[0]
-  try {
-    // Focused: a day and 7 seconds apart, every picture is the same source
-    pinnedNow = new Date(2026, 9, 27, 10, 54).getTime()
-    const before = await draw(true)
-    pinnedNow = new Date(2026, 9, 28, 10, 54, 7).getTime()
-    const after = await draw(true)
-    expect(after.text).toContain('1028.26')
-    expect(after.pics.some(svg => svg.includes('STANDARD ORBIT'))).toBe(true)
-    expect(after.pics).toEqual(before.pics)
-    // Unfocused: 7 seconds on, the ship's orbit starts 7 seconds further along
-    pinnedNow = new Date(2026, 9, 28, 10, 54, 0).getTime()
-    const start = orbit((await draw(false)).pics)
-    pinnedNow = new Date(2026, 9, 28, 10, 54, 7).getTime()
-    const later = orbit((await draw(false)).pics)
-    expect(start).not.toEqual(later)
-    const delay = (rule?: string) => Number(rule?.match(/animation-delay:(-?[\d.]+)s/)?.[1])
-    expect(Math.round((delay(start) - delay(later)) * 1000)).toBe(7000)
-  } finally {
-    pinnedNow = undefined
-  }
-})
-
-test('review: while the console holds the keyboard its pictures hold still, so a scroll tick reloads nothing heavy', async ($, on) => {
-  // Proved with the scroll probes on 2026-10-29: an animated viewscreen shivers the scroll of a
-  // pane that holds the keys (every wheel tick redraws it and the desktop re-creates the picture),
-  // the same picture with its animations stripped scrolls clean. Unfocused, no per-tick redraw
+test('review: a held console keeps every picture the same between redraws with the orbit paused, and a free one carries the orbit on with the clock', async ($, on) => {
+  // The desktop rebuilds a picture on each redraw, restarting its animations, so the orbit's start
+  // comes from the clock. A pane that holds the keyboard is redrawn on every scroll tick, and a
+  // source that changes per tick is reloaded (the shiver): so the clock is frozen when the pane
+  // takes the keys and the orbit paused there. Swapping to a different picture on focus flickered
+  // (repro panes, 2026-10-30)
   engine(on)
   await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
   const p = pane('starfleet-console', 'desktop')
@@ -1173,13 +1188,32 @@ test('review: while the console holds the keyboard its pictures hold still, so a
     await ui.unmount()
     return out
   }
-  const held = await sources(true)
-  expect(held.length).toBeGreaterThan(1)
-  for (const svg of held) expect(svg).not.toMatch(/animation(-delay)?:/)
-  const free = await sources(false)
-  expect(free.some(svg => /animation:orbit/.test(svg))).toBe(true)
-  // Stripping leaves a well-formed picture (the keyframes stay, named by nothing)
-  expect(stillSvg(viewscreenSvg('MOD', 'none', undefined))).toContain('</svg>')
+  const orbit = (pics: string[]) => pics.find(svg => svg.includes('STANDARD ORBIT'))?.match(/\.ship\{[^}]*\}/)?.[0]
+  const delay = (rule?: string) => Number(rule?.match(/animation-delay:(-?[\d.]+)s/)?.[1])
+  try {
+    // Free: 7 seconds on, the orbit starts 7 seconds further along, and nothing is paused
+    pinnedNow = new Date(2026, 9, 28, 10, 54, 0).getTime()
+    const start = await sources(false)
+    pinnedNow = new Date(2026, 9, 28, 10, 54, 7).getTime()
+    const later = await sources(false)
+    expect(start.length).toBeGreaterThan(1)
+    expect(Math.round((delay(orbit(start)) - delay(orbit(later))) * 1000)).toBe(7000)
+    expect(start.some(svg => svg.includes('animation-play-state:paused'))).toBe(false)
+    // Held: a day and 7 seconds apart, every picture is the same source, with the orbit paused
+    // where the clock stood when the pane took the keys
+    pinnedNow = new Date(2026, 9, 28, 10, 54, 7).getTime()
+    const held = await sources(true)
+    pinnedNow = new Date(2026, 9, 29, 10, 54, 14).getTime()
+    const stillHeld = await sources(true)
+    expect(stillHeld).toEqual(held)
+    expect(orbit(held)).toContain('animation:orbit')
+    expect(held.some(svg => svg.includes('.ship,.glow,.spark{animation-play-state:paused}'))).toBe(true)
+    expect(delay(orbit(held))).toBe(delay(orbit(later)))
+    // Let go, the clock runs again
+    expect((await sources(false)).some(svg => svg.includes('animation-play-state:paused'))).toBe(false)
+  } finally {
+    pinnedNow = undefined
+  }
 })
 
 test('the service record only counts up: a stale or unloaded copy never writes lower numbers', async ($, on) => {
@@ -1759,4 +1793,41 @@ test('About gives every part its name in the heading color', async ($, on) => {
     expect([name, (t?.props as { color?: string })?.color]).toEqual([name, '#ffcc99'])
   }
   await ui.unmount()
+})
+
+test('the project map files a folder under a project, in the records, the briefing and on removal', async ($, on) => {
+  const store = engine(on, undefined, undefined, { cwd: '/Users/cap/harbor' })
+  store['log:sess-1'] = [{ id: 'log-a', stardate: '1030.26', text: 'home note', at: Date.now(), project: 'harbor', category: 'note' }]
+  store['missions:sess-1'] = [{ id: 'sess-1', stardate: '1030.26', at: Date.now(), project: 'harbor', cwd: '/Users/cap/harbor/.claude/worktrees/x', turns: 0, redAlerts: 0, handoffs: 0 }]
+  store.logSessions = ['sess-1']
+  await $.session.start({ cwd: '/Users/cap/harbor', surface: 'desktop', isInteractive: true })
+  const map = (input: object) => callTool($, { tool: 'mcp__starfleet__starfleet_project_map', ...input }) as Promise<{ result: string }>
+  expect((await map({})).result).toContain('empty')
+  // A full path or any case files under the folder's own name
+  expect((await map({ folder: '/Users/cap/Harbor', project: 'Project Harbor' })).result).toContain('harbor now files under Project Harbor')
+  const records = JSON.parse((await callTool($, { tool: 'mcp__starfleet__starfleet_records' }) as { result: string }).result)
+  expect(records.log[0].project).toBe('Project Harbor')
+  // A worktree mission counts for the folder it was cut from
+  expect(records.missions[0].project).toBe('Project Harbor')
+  // The briefing reads this chat's project through the map, so it finds notes from the project's other folders
+  store['log:sess-0'] = [{ id: 'log-b', stardate: '1029.26', text: 'dock note', at: Date.now() - 1000, project: 'Dock', category: 'note' }]
+  store.logSessions = ['sess-1', 'sess-0']
+  store.aiSummaries = false
+  await map({ folder: 'Dock', project: 'Project Harbor' })
+  const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
+  await ui.press({ key: 'brief' })
+  await new Promise(done => setTimeout(done, 20))
+  expect(await ui.find({ type: 'Text', text: /dock note/ })).toBeTruthy()
+  await ui.unmount()
+  // The saved entry keeps its folder name, so a later map change relabels it
+  expect((store['log:sess-1'] as { project: string }[])[0]!.project).toBe('harbor')
+  expect((await map({ folder: 'harbor', project: '' })).result).toContain('off the map')
+  const after = JSON.parse((await callTool($, { tool: 'mcp__starfleet__starfleet_records' }) as { result: string }).result)
+  expect(after.log[0].project).toBe('harbor')
+})
+
+test('a folder not on the project map is its own project', () => {
+  expect(projectFor({ mod: 'Starfleet mod' }, 'MOD')).toBe('Starfleet mod')
+  expect(projectFor({ mod: 'Starfleet mod' }, 'Side Work')).toBe('Side Work')
+  expect(projectFor({ mod: 'Starfleet mod' }, 'Starfleet mod')).toBe('Starfleet mod')
 })

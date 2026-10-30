@@ -2,7 +2,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { readRecentLogs } from './log'
 import { isAiOn } from './prefs'
-import { basename } from './shared'
+import { projectName } from './projects'
 
 // The mission briefing: where this project left off, built once per session from the newest
 // handoff document (.claude/handoffs) and this project's recent captain's log entries from
@@ -66,7 +66,7 @@ export async function buildBriefing($: EngineInterface) {
 }
 
 async function composeBriefing($: EngineInterface) {
-  const project = basename(await $.session.cwd())
+  const project = await projectName($, await $.session.cwd())
   const handoff = await newestHandoff($)
   const log = (await readRecentLogs($)).filter(e => e.project === project).slice(0, 5)
   if (!handoff && log.length === 0) {

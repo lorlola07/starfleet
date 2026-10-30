@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.15
+
+### Added
+- **Project map:** chats from several folders file under one project in the log, missions, briefing and hub reports. Tell Claude "file the Side Work folder under Starfleet mod" to change it. Old entries and missions are relabeled too.
+- **Close mission sorts by project:** closure items that belong to another project are filed there as a note, but only the ones you tick.
+- **Close mission refreshes the overview:** the project's overview in the hub is rewritten from all its chapters, ending with what's still open. If you edited it in the hub, Claude asks before replacing it.
+- **New hubs get project reports and Export PDF:** the hub a new install publishes groups missions into one report per project, with each chat as a chapter, and exports a record as a PDF.
+
+### Fixed
+- Buttons on the desktop use the app's quieter secondary style instead of all turning white. Buttons meant to stand out (Captain's log, Hail Starfleet, Save, the picked tab) stay filled, so you can see which tab is picked again.
+- The console's control buttons have room between them on the desktop instead of touching, and the first column is wider so "Captain mode" shows in full.
+
+### Changed
+- Tried for the scroll shiver: while the console holds the keyboard, its pictures no longer swap to still versions; the viewscreen keeps one picture with its orbit paused. The shiver is still there. See Known issues in the README.
+
 ## 0.4.14
 
 ### Added

@@ -208,6 +208,10 @@ dialog.viewer iframe { width: 100%; height: 78vh; border: 0; background: #fff; b
 .mis-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .mis-head .nb-tools { margin-left: auto; }
 .toast { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.rec.capturing .files { max-height: none; overflow: visible; }
+.mis .row .pname { font-family: var(--display); font-size: 17px; letter-spacing: .04em; text-transform: uppercase; font-weight: 400; color: var(--fg); }
+.rec p.ov { white-space: pre-wrap; font-size: 17px; }
+.rec.capturing .rec-tools { visibility: hidden; }
 
 @media (max-width: 760px) { .nb { grid-template-columns: 1fr; } .tree { max-height: 320px; } }
 @media (max-width: 640px) { .wrap { grid-template-columns: 1fr; } .elbow { display: none; } .row, .mis .row, .mis .row.open { grid-template-columns: 1fr; gap: 2px; } .rec { padding: 14px; border-left-width: 10px; } .rec-head h3 { font-size: 22px; } .page { padding: 14px; } .field.title { font-size: 24px; } }
@@ -799,29 +803,100 @@ function crewMark(v, w) {
   return m;
 }
 let missions = [], misSel = store.get('mis-sel', null);
+/* Mission history by project: one report per project, and each chat (a handoff or a new chat) as a chapter in it */
+let projSel = store.get('mis-proj', null), reports = {}, editingOverview = null;
+const projectOfMission = v => v.project || UNFILED;
+const lastAt = g => Math.max(...g.missions.map(v => v.endedAt || v.at || 0));
+function projectGroups(list) {
+  const m = new Map();
+  list.forEach(v => { const p = projectOfMission(v); if (!m.has(p)) m.set(p, []); m.get(p).push(v); });
+  return [...m].map(([project, ms]) => ({ project, missions: ms.sort((a, b) => (a.at || 0) - (b.at || 0)) })).sort((a, b) => lastAt(b) - lastAt(a));
+}
 function renderMissions(list) {
   missions = list;
-  const host = $('mis');
-  $('n-mis').textContent = list.length ? list.length + ' missions' : '';
+  const host = $('mis'), groups = projectGroups(list);
+  if (projSel && !groups.some(g => g.project === projSel)) { projSel = null; store.set('mis-proj', null); }
+  $('n-mis').textContent = list.length ? `${groups.length} project${groups.length === 1 ? '' : 's'} · ${list.length} missions` : '';
   $('b-xall').hidden = !downloads || !list.length;
   renderRecord();
   if (!list.length) return;
   const wrap = el('div', 'list');
-  list.forEach(v => { const row = el('button', 'row open'); row.type = 'button';
-    row.setAttribute('aria-current', v.id === misSel ? 'true' : 'false');
-    row.setAttribute('aria-label', 'Open mission record: ' + (v.summary || 'Mission') + (v.project ? ', ' + v.project : ''));
-    row.onclick = () => { misSel = misSel === v.id ? null : v.id; store.set('mis-sel', misSel); renderMissions(missions); if (misSel) $('mis-rec').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
-    row.append(el('div', 'sd', v.stardate || '—'));
-    const t = el('div', 'txt', v.summary || 'Mission'); if (v.project) { t.append(' '); const mk = crewMark(v, 14); if (mk) t.append(mk, ' '); t.append(el('span', 'proj', (mk ? '' : '· ') + v.project)); }
-    row.append(t);
+  groups.forEach(g => { const row = el('button', 'row open'); row.type = 'button';
+    const latest = g.missions[g.missions.length - 1], n = g.missions.length;
+    row.setAttribute('aria-current', g.project === projSel ? 'true' : 'false');
+    row.setAttribute('aria-label', 'Open project report: ' + g.project);
+    row.onclick = () => { projSel = projSel === g.project ? null : g.project; misSel = null; store.set('mis-proj', projSel); store.set('mis-sel', null); renderMissions(missions); if (projSel) $('mis-rec').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
+    row.append(el('div', 'sd', latest.stardate || '—'));
+    const t = el('div', 'txt'); const mk = crewMark(latest, 14); if (mk) t.append(mk, ' '); t.append(el('b', 'pname', g.project)); t.append(' ', el('span', 'proj', latest.summary || '')); row.append(t);
     const pills = el('div'); pills.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
-    pills.append(el('span', 'pill', (v.turns || 0) + ' turns'));
-    if (v.redAlerts) pills.append(el('span', 'pill red', v.redAlerts + ' red alert' + (v.redAlerts > 1 ? 's' : '')));
-    if (v.handoffs) pills.append(el('span', 'pill ho', v.handoffs + ' handoff' + (v.handoffs > 1 ? 's' : '')));
-    // Every mission synced here is closed; a filed closure report can say partial or abandoned
-    pills.append(el('span', 'pill closed', 'closed' + (v.closure?.outcome && v.closure.outcome !== 'complete' ? ' · ' + v.closure.outcome : '')));
+    pills.append(el('span', 'pill', n + ' chapter' + (n === 1 ? '' : 's')), el('span', 'pill', g.missions.reduce((x, v) => x + (v.turns || 0), 0) + ' turns'));
+    const open = [...g.missions].reverse().find(v => v.closure)?.closure?.openItems?.length || 0;
+    if (open) pills.append(el('span', 'pill ho', open + ' open'));
     row.append(pills); wrap.append(row); });
   host.replaceChildren(wrap);
+}
+
+// One project's report: an overview, what each chapter delivered, what's still open, then the chapters
+function renderProject(g) {
+  const host = $('mis-rec'), ms = g.missions, latest = ms[ms.length - 1], key = slug(g.project);
+  const rec = el('article', 'rec'); rec.setAttribute('aria-label', 'Project report: ' + g.project);
+  const head = el('div', 'rec-head'), tools = el('div', 'rec-tools');
+  if (downloads) tools.append(btn('o', 'Export PDF', () => exportPdf(rec, `project-${key}.pdf`)));
+  tools.append(btn('ghost', 'Hide report', () => { projSel = null; store.set('mis-proj', null); renderMissions(missions); }));
+  head.append(el('div', 'crumb'), el('h3', '', g.project), tools);
+  head.firstChild.append(el('b', '', 'Project report'), ` · ${ms.length} chapter${ms.length === 1 ? '' : 's'}`);
+  rec.append(head);
+  const mark = crewMark(latest, 32); if (mark) { mark.classList.add('big'); rec.append(mark); }
+  const start = Math.min(...ms.map(v => v.at || Infinity)), end = Math.max(...ms.map(v => v.endedAt || 0));
+  const sum = f => ms.reduce((n, v) => n + (Number(f(v)) || 0), 0);
+  const facts = el('div', 'facts');
+  facts.append(fact('Started', when(start)), fact('Last worked', end ? when(end) : 'In progress'), fact('Chapters', String(ms.length)),
+    fact('Turns', String(sum(v => v.turns))), fact('Commits', String(sum(v => v.warpCore?.commits))), fact('Handoffs', String(sum(v => v.handoffs))));
+  rec.append(facts);
+
+  const r = reports[key], ov = [];
+  if (editingOverview === g.project) {
+    const f = el('form', 'ed'), ta = el('textarea', 'big'); ta.value = r?.overview || ''; ta.setAttribute('aria-label', 'Project overview');
+    const save = el('button', 'btn p', 'Save'); save.type = 'submit';
+    const state = el('span', 'toast'); state.setAttribute('role', 'status');
+    const acts = el('div', 'actions'); acts.append(save, btn('ghost', 'Cancel', () => { editingOverview = null; renderRecord(); }), state);
+    f.append(ta, acts);
+    f.onsubmit = async e => { e.preventDefault(); if (!db) return; save.disabled = true; state.textContent = 'Saving…';
+      try { await db.collection('reports').doc(key).set({ project: g.project, overview: ta.value.trim(), updatedAt: Date.now() }); editingOverview = null; renderRecord(); }
+      catch { save.disabled = false; state.className = 'toast err'; state.textContent = 'Not saved. Check your connection.'; } };
+    f.onkeydown = e => { if (e.key === 'Escape') { editingOverview = null; renderRecord(); } };
+    ov.push(f); setTimeout(() => ta.focus(), 0);
+  } else {
+    ov.push(r?.overview ? el('p', 'ov', r.overview) : el('p', 'hint', 'No overview yet.'));
+    if (db) ov.push(el('div', 'actions', null)), ov[ov.length - 1].append(btn('p', r?.overview ? 'Edit overview' : 'Write overview', () => { editingOverview = g.project; renderRecord(); }));
+  }
+  rec.append(block('Overview', 'sm', ...ov));
+
+  const del = [];
+  ms.forEach((v, i) => { const d = v.closure?.delivered; if (!Array.isArray(d) || !d.length) return;
+    del.push(el('div', 'cl-sub', `Chapter ${i + 1} · SD ${v.stardate || '—'}`)); const ul = el('ul', 'cl-list'); d.forEach(x => ul.append(el('li', '', String(x)))); del.push(ul); });
+  rec.append(block('Delivered across chapters', 'cl', ...(del.length ? del : [el('p', 'hint', 'No closure reports yet.')])));
+
+  // What's open comes from the latest chapter with a closure report: older open items were picked up or carried forward
+  const lc = [...ms].reverse().find(v => v.closure), open = [];
+  if (lc?.closure?.openItems?.length) { open.push(el('div', 'cl-sub', `From chapter ${ms.indexOf(lc) + 1} · SD ${lc.stardate || '—'}`)); const ul = el('ul', 'cl-list'); lc.closure.openItems.forEach(x => ul.append(el('li', '', String(x)))); open.push(ul); }
+  else open.push(el('p', 'hint', 'Nothing open.'));
+  if (lc?.closure?.nextStep && lc.closure.nextStep !== 'None') open.push(el('div', 'cl-sub', 'Next step'), el('p', '', lc.closure.nextStep));
+  rec.append(block('Still open', 'wc', ...open));
+
+  const list = el('div', 'list');
+  ms.forEach((v, i) => { const row = el('button', 'row open'); row.type = 'button';
+    row.setAttribute('aria-label', `Open chapter ${i + 1}: ${v.summary || 'Mission'}`);
+    row.append(el('div', 'sd', v.stardate || '—'), el('div', 'txt', `Chapter ${i + 1}: ${v.summary || 'Mission'}`));
+    const pills = el('div'); pills.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
+    pills.append(el('span', 'pill', (v.turns || 0) + ' turns'));
+    if (v.handoffs) pills.append(el('span', 'pill ho', v.handoffs + ' handoff' + (v.handoffs > 1 ? 's' : '')));
+    pills.append(el('span', 'pill closed', 'closed' + (v.closure?.outcome && v.closure.outcome !== 'complete' ? ' · ' + v.closure.outcome : '')));
+    row.append(pills);
+    row.onclick = () => { misSel = v.id; store.set('mis-sel', misSel); renderRecord(); $('mis-rec').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
+    list.append(row); });
+  rec.append(block('Chapters', 'fl', list));
+  host.replaceChildren(rec);
 }
 
 /* The full record of one mission, opened from its row */
@@ -869,6 +944,32 @@ async function exportMd(filename, text) {
   try { await downloads.save({ filename, data: text }); st.textContent = 'Exported ' + filename; }
   catch (e) { st.textContent = e?.code === 'declined' ? 'Export cancelled.' : e?.code === 'rate_limited' ? 'A save prompt is already open.' : 'Export failed. Try again.'; }
 }
+/* PDF export: a picture of the open record, exactly as it looks, on one page sized to fit all of it.
+   The two libraries load on first use, so the page itself stays light */
+const LIBS = ['https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'];
+let libsReady = null;
+function loadLibs() {
+  libsReady ??= Promise.all(LIBS.map(src => new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = src; sc.onload = ok; sc.onerror = no; document.head.append(sc); })))
+    .catch(e => { libsReady = null; throw e; });
+  return libsReady;
+}
+async function exportPdf(rec, filename) {
+  const st = $('x-state');
+  if (!downloads) { st.textContent = 'Export is not available in this view.'; return; }
+  st.textContent = 'Making the PDF…';
+  try { await loadLibs(); await document.fonts?.ready; } catch { st.textContent = 'Could not load the PDF tools. Check your connection.'; return; }
+  // Open the scroll boxes so nothing is cut off, and leave the buttons out of the picture
+  rec.classList.add('capturing');
+  let canvas;
+  try { canvas = await window.html2canvas(rec, { backgroundColor: '#07070c', scale: 2, useCORS: true, logging: false }); }
+  catch { st.textContent = 'Could not capture the record. Try again.'; return; }
+  finally { rec.classList.remove('capturing'); }
+  const w = canvas.width / 2, h = canvas.height / 2;
+  const pdf = new window.jspdf.jsPDF({ orientation: w > h ? 'l' : 'p', unit: 'px', format: [w, h], hotfixes: ['px_scaling'] });
+  pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, w, h);
+  try { await downloads.save({ filename, data: pdf.output('blob') }); st.textContent = 'Exported ' + filename; }
+  catch (e) { st.textContent = e?.code === 'declined' ? 'Export cancelled.' : e?.code === 'rate_limited' ? 'A save prompt is already open.' : 'Export failed. Try again.'; }
+}
 $('b-xall').onclick = () => exportMd(`starfleet-missions-${new Date().toISOString().slice(0, 10)}.md`,
   `# Starfleet mission history\n\n${missions.length} missions, exported ${when(Date.now())}\n\n` + missions.map(missionMd).join('\n---\n\n'));
 
@@ -912,14 +1013,17 @@ function renderEditor(v) {
 
 function renderRecord() {
   const host = $('mis-rec'), v = missions.find(m => m.id === misSel);
-  if (!v) { editing = null; host.replaceChildren(); return; }
+  if (!v) { editing = null; const g = projSel && projectGroups(missions).find(x => x.project === projSel); if (g) renderProject(g); else host.replaceChildren(); return; }
   // Live updates must not wipe what's being typed
   if (editing === v.id) { if (!host.querySelector('form.ed')) renderEditor(v); return; }
   editing = null;
   const rec = el('article', 'rec'); rec.setAttribute('aria-label', 'Mission record');
   const head = el('div', 'rec-head'), recTools = el('div', 'rec-tools');
   if (db) recTools.append(btn('p', 'Edit', () => { editing = v.id; renderEditor(v); }));
-  if (downloads) recTools.append(btn('o', 'Export', () => exportMd(`mission-${slug(v.project)}-${v.stardate || v.id}.md`, missionMd(v))));
+  if (downloads) recTools.append(btn('o', 'Export', () => exportMd(`mission-${slug(v.project)}-${v.stardate || v.id}.md`, missionMd(v))),
+    btn('o', 'Export PDF', () => exportPdf(rec, `mission-${slug(v.project)}-${v.stardate || v.id}.pdf`)));
+  // A chapter opened from its project report goes back to that report
+  if (projSel && projectOfMission(v) === projSel) recTools.append(btn('ghost', '‹ ' + projSel + ' report', () => { misSel = null; store.set('mis-sel', null); renderRecord(); }));
   recTools.append(btn('ghost', 'Hide record', () => { misSel = null; store.set('mis-sel', null); renderMissions(missions); }),
     armDelete('Delete mission', () => deleteMission(v)));
   head.append(el('div', 'crumb'), el('h3', '', v.summary || 'Mission' + (v.project ? ' in ' + v.project : '')), recTools);
@@ -1015,5 +1119,7 @@ function renderRecord() {
   db.collection('pins').orderBy('at', 'desc').limit(300).onSnapshot(s => { S.pins = docs(s); refreshPins(); }, fail);
   window.claude?.use?.('assets').then(a => { assets = a; refreshPins(); }).catch(() => {});
   db.collection('missions').orderBy('at', 'desc').limit(100).onSnapshot(s => renderMissions(docs(s)), fail);
+  db.collection('reports').orderBy('updatedAt', 'desc').limit(100).onSnapshot(s => { reports = Object.fromEntries(docs(s).map(d => [d.id, d])); if (!editingOverview) renderRecord(); }, () => {});
 })();
 </script>
+

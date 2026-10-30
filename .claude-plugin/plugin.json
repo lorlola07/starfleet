@@ -1,6 +1,6 @@
 {
   "name": "starfleet",
-  "version": "0.4.14",
+  "version": "0.4.15",
   "description": "A Star Trek themed Claude Code mod: a crew member for each project that shows where Claude's work is at, a captain's log synced to your own hub page, a warp core that shows context and hands off to a new chat, and Shields against risky commands",
   "author": { "name": "Lauren" },
   "homepage": "https://github.com/lorlola07/starfleet",

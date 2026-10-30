@@ -11,6 +11,7 @@ import { crewSessionStart, crewTurnComplete, registerCrew } from './crew'
 import { logSessionStart, logTyping, missionTurnComplete, recordsJson, registerLog } from './log'
 import { hostileReason } from './shields'
 import { opsSessionStart, opsTurnComplete, opsTurnStart, registerOps, setRedAlert } from './ops'
+import { projectsSessionStart, registerProjects } from './projects'
 import { CAPTAIN_PROMPT, registerTakeover } from './takeover'
 
 // Session state that redraws its readers when written (and survives a reload)
@@ -129,6 +130,7 @@ export const register: Register = on => {
   registerCrew(on)
   registerConsole(on)
   registerAbout(on)
+  registerProjects(on)
 
   on('session.start', async ($, e, next) => {
     // Cheap registrations first, then each module on its own: one failing start never stops the rest
@@ -145,6 +147,7 @@ export const register: Register = on => {
       () => loadRecord($),
       () => opsSessionStart($),
       () => logSessionStart($),
+      () => projectsSessionStart($),
       () => crewSessionStart($),
       () => coreSessionStart($),
       () => consoleSessionStart($),

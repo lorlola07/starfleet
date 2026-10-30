@@ -11,7 +11,7 @@ import { checkForUpdate } from './update'
 import { redAlertSvg, toggleRedAlert } from './ops'
 import { BADGE_H, BADGE_W, RANKS, SPRITES, SPRITE_COLORS, basename, pipsSvg, rankBadgeSvg, rankOf, stardate } from './shared'
 import { COURSE, courseOf, duration, readVoyage, updateVoyage } from './voyage'
-import { LCARS, PLANETS, chirp, commsBadgeSvg, isMuted, lcarsCode, lcarsFrameSvg, planetOf, stillSvg, viewscreenSvg } from './theme'
+import { LCARS, PLANETS, chirp, commsBadgeSvg, isMuted, lcarsCode, lcarsFrameSvg, planetOf, viewscreenSvg } from './theme'
 
 // The Starfleet console: viewscreen, mission briefing, then each station in a collapsible
 // LCARS section. Which sections are open is kept across sessions, and so is focus mode,
@@ -35,6 +35,9 @@ const RECORD: SectionSpec = { id: 'record', label: 'SERVICE RECORD' }
 let open: Record<Section, boolean> = { crew: true, core: true, record: false }
 let isOpenLoaded = false
 let muted = false
+// The clock reading when the console last took the keyboard; undefined while it does not hold it.
+// Lost on a reload, which only moves where the paused ship sits
+let heldAt: number | undefined
 let isFocus = false
 // Whether the focus-mode badge holds still, kept in the store so it stays paused across reloads
 let isBadgePaused = false
@@ -234,10 +237,14 @@ export function registerConsole(on: On) {
       )
     }
     const now = await $.clock.now()
-    // While the console holds the keyboard (after any click in it) every wheel tick redraws it, and
-    // an animated picture then shivers the scroll (see stillSvg): the pictures hold still until Esc
+    // The desktop rebuilds every picture on each redraw, which restarts its CSS animations, so the
+    // viewscreen takes its orbit's start from the clock and the ship carries on where it was.
+    // While the pane holds the keyboard (after any click in it) every wheel tick redraws it, and a
+    // source that changes per tick is reloaded and shivers the scroll: so the clock is frozen at
+    // the moment the pane took the keys and the orbit is paused there, which keeps the source the
+    // same from tick to tick. Swapping to a different picture on focus flickered (repro, 2026-10-30)
     const isHeld = e.props.isFocused === true
-    const pic = (svg: string) => (isHeld ? stillSvg(svg) : svg)
+    heldAt = isHeld ? (heldAt ?? now) : undefined
     // The width drawings are laid out at; each Svg carries no size of its own, so the surface
     // scales it down to fit the pane (height follows) whenever the pane is narrower
     const width = Math.max(240, Math.min(560, ((e.props.bodyColumns ?? 50) - 4) * 8))
@@ -313,7 +320,7 @@ export function registerConsole(on: On) {
             out. A plain image (not interactive) fills that space; its CSS orbit animation still runs */}
         <Box flexGrow={1} flexShrink={1} minWidth={0}>
           {hasSvg
-            ? <el.Svg source={pic(viewscreenSvg(project, tint, planet.id, crewColor, isHeld ? undefined : now))} alt={`Viewscreen: the ship in standard orbit around ${project}, a ${planet.name} planet`} />
+            ? <el.Svg source={viewscreenSvg(project, tint, planet.id, crewColor, isHeld ? heldAt : now, isHeld)} alt={`Viewscreen: the ship in standard orbit around ${project}, a ${planet.name} planet`} />
             : <Text color={LCARS.blue} wrap="truncate">{`   ·   ✦     (◯) ${planet.name}   >=<    ·   ✦  `}</Text>}
         </Box>
         <Button key="planet-next" label="▶" plain dimColor onPress={() => cyclePlanet($, project, 1)} />
@@ -363,11 +370,13 @@ export function registerConsole(on: On) {
             <Text tabular>{voyage.orders + a.turnCalls}</Text>
           </Text>
         </Box>
-        {/* Admin controls on an invisible grid, so they line up: 3 columns, 2 on a narrow pane */}
-        <Box flexDirection="column" rowGap={0}>
+        {/* Admin controls on an invisible grid, so they line up: 3 columns, 2 on a narrow pane. The first
+            column is wider so "Captain mode: off" fits whole. On the desktop they are filled buttons,
+            so each cell leaves a gap to its right and below */}
+        <Box flexDirection="column" rowGap={hasSvg ? 1 : 0}>
           {chunk(adminButtons, isNarrow ? 2 : 3).map((row, r) => (
             <Box key={'admin-' + r} flexDirection="row">
-              {row.map((b, c) => <Box key={`cell-${r}-${c}`} width={isNarrow ? '50%' : '33%'}>{b}</Box>)}
+              {row.map((b, c) => <Box key={`cell-${r}-${c}`} width={(isNarrow ? ['58%', '42%'] : ['40%', '30%', '30%'])[c]} paddingRight={hasSvg ? 1 : 0}>{b}</Box>)}
             </Box>
           ))}
         </Box>
@@ -412,7 +421,7 @@ export function registerConsole(on: On) {
           // A plain image (not interactive) takes the full width of its box; its CSS walk and bob
           // animations still run inside it
           <Box width="100%">
-            <el.Svg source={pic(crewSvg(crew, now))} alt={crew.map(c => `${c.name} (${c.project}) on ${c.deck}`).join(', ')} />
+            <el.Svg source={crewSvg(crew, now)} alt={crew.map(c => `${c.name} (${c.project}) on ${c.deck}`).join(', ')} />
           </Box>
         )}
         {!hasSvg && crew.map(c => (
@@ -471,7 +480,7 @@ export function registerConsole(on: On) {
         {/* The core with its Eject button under it, at the column's right edge */}
         <Box flexShrink={0} flexDirection="column" rowGap={1}>
           {hasSvg
-            ? <el.Svg source={pic(coreSvg(percent, seconds !== null, flags.isEjecting))} alt={`Warp core at ${percent}% load`} width={80} height={200} isInteractive />
+            ? <el.Svg source={coreSvg(percent, seconds !== null, flags.isEjecting)} alt={`Warp core at ${percent}% load`} width={80} height={200} isInteractive />
             : <Text color={LCARS.blue}>{'▮\n'.repeat(7)}</Text>}
           <Box flexDirection="row" justifyContent="flex-end" width="100%">
             <Button key="eject" label={flags.isArmed ? 'Confirm eject' : 'Eject core'} hotkey="e" plain onPress={() => pressed($, () => ejectCore($))} />

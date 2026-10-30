@@ -33,10 +33,11 @@ export function onDark<T>(tree: T, filled = false): T {
       props = { ...rest, color: dimColor ? LCARS.dim : LCARS.text }
     }
     // The desktop draws Buttons natively in the app's theme and ignores any color the mod gives them,
-    // so a plain one turns dark on dark in light mode. The app's own filled button reads in both
+    // so a plain one turns dark on dark in light mode. The app's own secondary button reads in both;
+    // a button that asked for primary keeps it, so a picked tab still stands out
     if (el.type === 'Button' && filled) {
       const { plain, ...rest } = props ?? {}
-      return { ...el, props: { ...rest, variant: 'primary' } }
+      return { ...el, props: { ...rest, variant: rest.variant === 'primary' ? 'primary' : 'secondary' } }
     }
     const children = el.children?.map(c => paint(c, inText || el.type === 'Text'))
     return { ...el, ...(props ? { props } : {}), ...(children ? { children } : {}) }
@@ -197,15 +198,11 @@ export function planetOf(id: string | undefined): PlanetSpec {
 // any pane, so the surface scales the whole picture down to fill its slot edge to edge
 export const FILL_WIDTH = 1600
 
-// A picture with every CSS animation taken out, for a pane that holds the keyboard. While it does,
-// every wheel tick redraws the pane and the desktop re-creates each picture; an animated one costs
-// enough that it has no height for a moment, the scroll is clamped and pulled back a row (the
-// shiver, proved with the scroll probes on 2026-10-29: the still viewscreen scrolled clean, the
-// animated one did not, keyed or not). Unfocused, a pane is not redrawn per tick, so the animations
-// stay. The keyframes are left in; without a property naming them they do nothing
-export const stillSvg = (svg: string) => svg.replace(/animation(?:-delay)?:[^;}"]*;?/g, '')
-
-export function viewscreenSvg(project: string, tint: 'none' | 'red' | 'borg', planetId: string | undefined, color?: string, now?: number): string {
+// The viewscreen. Given the clock, each animation starts as far along its loop as the clock says,
+// so a picture the desktop rebuilds on a redraw carries on instead of snapping back to the start.
+// isHeld pauses the animations where that clock puts them: the console passes a frozen clock with
+// it, so the source stays the same across the per-tick redraws of a pane that holds the keyboard
+export function viewscreenSvg(project: string, tint: 'none' | 'red' | 'borg', planetId: string | undefined, color?: string, now?: number, isHeld = false): string {
   // As wide as the ship's orbit needs and no wider, so the planet fills more of the frame
   const w = 400
   const h = 190
@@ -214,11 +211,6 @@ export function viewscreenSvg(project: string, tint: 'none' | 'red' | 'borg', pl
   const sky = tint === 'red' ? '#1d0707' : tint === 'borg' ? '#06140a' : '#05060f'
   const cx = Math.round(w / 2)
   const cy = 82
-  // The desktop reloads the picture on every redraw, restarting its animations, and the console
-  // redraws once a second while Claude works: given the clock, each animation starts as far along
-  // its loop as the clock says, so the ship carries on instead of snapping back to the start. A
-  // focused console passes no clock: its picture is held still (stillSvg) and must stay the same
-  // source between redraws, or it shivers the scroll
   const along = (loopMs: number, delayS = 0) => `${Number((delayS - (now === undefined ? 0 : (now % loopMs) / 1000)).toFixed(3))}s`
   let stars = ''
   let s = hashOf(project + 'stars')
@@ -245,6 +237,7 @@ ${art.defs}</defs>
 .ship{animation:orbit 16s linear infinite;animation-delay:${along(16000)}}
 .glow{animation:glow 2.4s ease-in-out infinite;animation-delay:${along(2400)}}
 .spark{animation:spark 2.4s steps(3) infinite;animation-delay:${along(2400)}}
+${isHeld ? '.tw,.ship,.glow,.spark{animation-play-state:paused}' : ''}
 @media (prefers-reduced-motion:reduce){.tw,.ship,.glow,.spark{animation:none}.ship{transform:translate(${cx - 150}px,${cy - 6}px)}}
 </style>
 <g clip-path="url(#vs)">
