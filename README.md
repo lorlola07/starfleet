@@ -71,7 +71,7 @@ What we know so far: it looks like the app keeps the pressed button in view on e
 
 ## Install
 
-**In the Claude desktop app:** follow the [step-by-step install guide](https://claude.ai/artifact/8GKjEAWPKYRjkaAidRhmem), with screenshots. In short: Customize → Plugins → + Add → Add marketplace → Add from a repository → `lorlola07/starfleet` → Sync, then add Starfleet, run `/starfleet` and press **Set up my hub**.
+**In the Claude desktop app:** follow the [step-by-step install guide](https://claude.ai/artifact/8GKjEAWPKYRjkaAidRhmem), with screenshots. In short: Customize → Plugins → + Add → Add marketplace → Add from a repository → `lorlola07/starfleet` → Sync. Then open Claude Code, run `/starfleet` and press **Set up my hub**.
 
 **In a terminal,** at the prompt of a Claude Code session:
 
