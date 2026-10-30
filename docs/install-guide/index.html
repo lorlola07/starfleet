@@ -1,0 +1,188 @@
+<title>Starfleet Install Guide</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Antonio:wght@600;700&family=Barlow+Semi+Condensed:wght@400;500;600&family=Space+Mono&display=swap">
+<style>
+/* One LCARS look, dark in every theme like the mod itself: an orange elbow header, then a single
+   column of numbered steps, each a lilac rail with its screenshot framed underneath */
+:root {
+  color-scheme: dark;
+  --space: #07070c;
+  --panel: #12121c;
+  --line: #2a2a3d;
+  --fg: #f1ece4;
+  --muted: #b3aec2;
+  --orange: #ff9966;
+  --peach: #ffcc99;
+  --lilac: #cc99cc;
+  --gold: #ffcc33;
+  --red: #ff5555;
+  --ink: #000;
+  --display: "Antonio", "Arial Narrow", sans-serif;
+  --body: "Barlow Semi Condensed", "Helvetica Neue", Arial, sans-serif;
+  --mono: "Space Mono", ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { background: var(--space); color: var(--fg); font-family: var(--body); font-size: 18px; line-height: 1.55; }
+.wrap { max-width: 760px; margin: 0 auto; padding-block: 28px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 28px; }
+a { color: var(--peach); }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--peach); outline-offset: 2px; }
+code, .mono { font-family: var(--mono); font-size: .86em; }
+code { background: var(--panel); border: 1px solid var(--line); padding: 1px 6px; border-radius: 4px; color: var(--peach); }
+
+header { border-top: 18px solid var(--orange); border-left: 18px solid var(--orange); border-top-left-radius: 40px; padding: 14px 0 0 20px; display: grid; gap: 8px; }
+.code-tag { justify-self: start; font-family: var(--display); font-weight: 700; letter-spacing: .08em; font-size: 13px; color: var(--ink); background: var(--lilac); padding: 1px 12px; border-radius: 0 10px 10px 0; }
+h1 { font-family: var(--display); font-weight: 700; text-transform: uppercase; letter-spacing: .02em; font-size: clamp(40px, 9vw, 64px); line-height: .95; margin: 0; text-wrap: balance; }
+.lede { margin: 0; color: var(--muted); max-width: 60ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 18px; font-family: var(--mono); font-size: 13px; color: var(--peach); }
+
+ol.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 26px; counter-reset: step; }
+.step { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 16px; }
+.num { font-family: var(--display); font-weight: 700; font-size: 26px; color: var(--ink); background: var(--lilac); border-radius: 18px 0 0 18px; display: grid; place-items: start center; padding-top: 6px; min-height: 100%; }
+.step.hub .num { background: var(--gold); }
+.body { display: grid; gap: 10px; min-width: 0; padding-bottom: 4px; }
+h2 { font-family: var(--display); font-weight: 600; font-size: 26px; letter-spacing: .03em; text-transform: uppercase; margin: 0; line-height: 1.15; text-wrap: balance; }
+.body p { margin: 0; max-width: 62ch; }
+.ok { font-size: 16px; color: var(--muted); border-left: 3px solid var(--gold); padding-left: 10px; }
+.ok b { color: var(--gold); font-weight: 600; }
+figure { margin: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
+figure img { display: block; width: 100%; height: auto; }
+figure.narrow { max-width: 300px; }
+figure.console { max-width: 340px; background: var(--space); }
+.copy { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.copy code { font-size: 17px; padding: 6px 12px; user-select: all; }
+button.cp { font: 600 14px var(--body); letter-spacing: .04em; text-transform: uppercase; color: var(--ink); background: var(--peach); border: 0; border-radius: 14px; padding: 6px 16px; min-height: 36px; cursor: pointer; }
+button.cp:hover { filter: brightness(1.08); }
+.gap { font-size: 15px; color: var(--muted); font-style: italic; }
+
+.alert { display: flex; gap: 14px; align-items: flex-start; background: #2a0b0b; border: 2px solid var(--red); border-radius: 6px; padding: 14px 18px; }
+.alert b { font-family: var(--display); font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--red); font-size: 20px; display: block; margin-bottom: 2px; }
+.alert .dot { flex: none; width: 16px; height: 16px; margin-top: 6px; border-radius: 50%; background: var(--red); box-shadow: 0 0 0 4px rgb(255 85 85 / .25); }
+@media (prefers-reduced-motion: no-preference) { .alert .dot { animation: pulse 1.2s ease-in-out infinite; } @keyframes pulse { 50% { opacity: .35; } } }
+.box { background: var(--panel); border: 1px solid var(--line); border-radius: 4px 22px 22px 4px; padding: 16px 20px; display: grid; gap: 8px; }
+.box.bug { border-left: 14px solid var(--red); }
+.box.alt { border-left: 14px solid var(--orange); }
+.box h3 { font-family: var(--display); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; font-size: 20px; margin: 0; }
+.box p { margin: 0; }
+.links { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+/* The PDF keeps the dark console look, and a step never splits across two pages */
+@page { size: letter; margin: 0; }
+@media print {
+  html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: var(--space); }
+  .wrap { padding-block: 40px 40px; padding-left: 48px; padding-right: 48px; max-width: none; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+  .step, .alert, .box, figure { break-inside: avoid; }
+  /* The red alert always lands on the same page as the hub step it points to */
+  .step.hub { break-before: avoid; }
+  .alert { break-before: page; }
+  button.cp { display: none; }
+  .alert .dot { animation: none; }
+}
+@media (max-width: 480px) { .step { grid-template-columns: 38px minmax(0, 1fr); gap: 0 12px; } .num { font-size: 20px; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="code-tag">LCARS 07-1029</span>
+    <h1>Starfleet install guide</h1>
+    <p class="lede">Starfleet turns Claude Code into a starship console: a crew member for each project, a captain's log that saves to your own private page, and a warp core that shows how full your chat is. Here's how to add it in the Claude desktop app.</p>
+    <div class="meta"><span>About 3 minutes</span><span>Claude desktop app</span><span>Free, open source</span></div>
+  </header>
+
+  <ol class="steps">
+    <li class="step">
+      <div class="num" aria-hidden="true">1</div>
+      <div class="body">
+        <h2>Open Customize</h2>
+        <p>In the Claude app's left sidebar, click <b>Customize</b>. It's right under New, Artifacts and Routines.</p>
+        <figure class="narrow"><img src="1-customize.png" alt="The Claude sidebar with New, Artifacts, Routines and Customize, with Customize highlighted"></figure>
+        <p class="ok"><b>You'll know it worked</b> when a Customize page opens with Skills, Connectors and Plugins across the top.</p>
+      </div>
+    </li>
+
+    <li class="step">
+      <div class="num" aria-hidden="true">2</div>
+      <div class="body">
+        <h2>Plugins, then Add marketplace</h2>
+        <p>Click the <b>Plugins</b> tab. Then press <b>+ Add</b> at the top right and choose <b>Add marketplace</b>. All three are boxed in red below.</p>
+        <figure><img src="2-plugins-add.png" alt="The Customize page on the Plugins tab, with the Add menu open. Plugins, Add and Add marketplace are boxed in red"></figure>
+      </div>
+    </li>
+
+    <li class="step">
+      <div class="num" aria-hidden="true">3</div>
+      <div class="body">
+        <h2>Add from a repository</h2>
+        <p>In the box that opens, choose <b>Add from a repository</b>.</p>
+        <figure><img src="3-add-marketplace.png" alt="The Add marketplace box with two choices: Browse Anthropic sources, and Add from a repository"></figure>
+      </div>
+    </li>
+
+    <li class="step">
+      <div class="num" aria-hidden="true">4</div>
+      <div class="body">
+        <h2>Type the Starfleet address</h2>
+        <p>Click the <b>URL</b> field and type this. Pick <b>starfleet</b> from the list when it shows up, then press <b>Sync</b>.</p>
+        <div class="copy"><code id="addr">lorlola07/starfleet</code><button class="cp" id="cp" type="button">Copy</button></div>
+        <figure><img src="5-pick.png" alt="The URL field with lorlola07/starfleet typed in, and starfleet by lorlola07 suggested in the list below it"></figure>
+        <p class="ok"><b>Heads up:</b> the box warns you to only add marketplaces you trust. That's a normal check for any marketplace outside Anthropic's own. Pressing <b>Sync</b> adds Starfleet for you.</p>
+      </div>
+    </li>
+
+    <li class="step">
+      <div class="num" aria-hidden="true">5</div>
+      <div class="body">
+        <h2>Open Claude Code, then type /starfleet</h2>
+        <p>Open Claude Code and type <code>/starfleet</code>.</p>
+        <figure class="console"><img src="6-console.png" alt="The Starfleet console: the USS Claude header, a ship orbiting a purple planet, the stardate and condition, a grid of buttons, and the Captain's log block"></figure>
+      </div>
+    </li>
+
+    <li class="alert" role="note">
+      <span class="dot" aria-hidden="true"></span>
+      <div><b>Red alert: don't skip this one.</b> To get the most out of Starfleet, set up your hub. It's where your captain's log notes, crew and missions are saved, so without it your notes have nowhere to go.</div>
+    </li>
+
+    <li class="step hub">
+      <div class="num" aria-hidden="true">6</div>
+      <div class="body">
+        <h2>Set up your hub</h2>
+        <p>Under <b>Captain's log</b> in the console, press <b>Set up my hub</b>. Claude makes your own private Starfleet Command page on claude.ai, where your notes, crew and missions are saved.</p>
+        <p class="ok"><b>You'll know it worked</b> when Claude replies with a link to your new page and the button goes away. Notes you log from then on land there on their own.</p>
+      </div>
+    </li>
+  </ol>
+
+  <section class="box bug" aria-labelledby="h-bug">
+    <h3 id="h-bug">One known bug. Want to help solve it?</h3>
+    <p>After you press a button in the console, scrolling can shiver in place. Press <b>Esc</b> and it stops right away.</p>
+    <p>We haven't cracked this one yet. If you like a good puzzle, the <a href="https://github.com/lorlola07/starfleet#known-issues">Known issues</a> section of the README has what we've tried so far, and you can share an idea or a fix on <a href="https://github.com/lorlola07/starfleet/issues">GitHub</a>.</p>
+  </section>
+
+  <section class="box alt" aria-labelledby="h-term">
+    <h3 id="h-term">Using the terminal instead?</h3>
+    <p>Run this at a Claude Code prompt, say yes to adding the marketplace, then pick a scope:</p>
+    <p><code>/plugin install starfleet --marketplace lorlola07/starfleet</code></p>
+  </section>
+
+  <div class="links">
+    <a href="https://claude.ai/artifact/EXnVvVFcAgf7jU5NGX6VpU">Try the interactive demo</a>
+    <a href="https://github.com/lorlola07/starfleet">Read the README</a>
+    <a href="https://github.com/lorlola07/starfleet/issues">Report a problem</a>
+  </div>
+</div>
+
+<script>
+document.getElementById('cp').addEventListener('click', async e => {
+  const btn = e.currentTarget
+  try {
+    await navigator.clipboard.writeText('lorlola07/starfleet')
+    btn.textContent = 'Copied'
+  } catch {
+    const range = document.createRange()
+    range.selectNodeContents(document.getElementById('addr'))
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range)
+    btn.textContent = 'Selected: press ⌘C'
+  }
+  setTimeout(() => { btn.textContent = 'Copy' }, 2200)
+})
+</script>
