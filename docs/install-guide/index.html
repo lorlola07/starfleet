@@ -57,6 +57,8 @@ button.cp:hover { filter: brightness(1.08); }
 
 .alert { display: flex; gap: 14px; align-items: flex-start; background: #2a0b0b; border: 2px solid var(--red); border-radius: 6px; padding: 14px 18px; }
 .alert b { font-family: var(--display); font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--red); font-size: 20px; display: block; margin-bottom: 2px; }
+.alert b.find { font-size: 16px; color: var(--peach); display: inline; letter-spacing: .04em; }
+.alert b.in { font: inherit; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--fg); display: inline; }
 .alert .dot { flex: none; width: 16px; height: 16px; margin-top: 6px; border-radius: 50%; background: var(--red); box-shadow: 0 0 0 4px rgb(255 85 85 / .25); }
 @media (prefers-reduced-motion: no-preference) { .alert .dot { animation: pulse 1.2s ease-in-out infinite; } @keyframes pulse { 50% { opacity: .35; } } }
 .box { background: var(--panel); border: 1px solid var(--line); border-radius: 4px 22px 22px 4px; padding: 16px 20px; display: grid; gap: 8px; }
@@ -103,7 +105,7 @@ button.cp:hover { filter: brightness(1.08); }
       <div class="num" aria-hidden="true">2</div>
       <div class="body">
         <h2>Plugins, then Add marketplace</h2>
-        <p>Click the <b>Plugins</b> tab. Then press <b>+ Add</b> at the top right and choose <b>Add marketplace</b>. All three are boxed in red below.</p>
+        <p>At the top of the Customize page, click the <b>Plugins</b> tab. Then press <b>+ Add</b> in the top right corner of the page and choose <b>Add marketplace</b> from the menu that drops down. All three are boxed in red below.</p>
         <figure><img src="2-plugins-add.png" alt="The Customize page on the Plugins tab, with the Add menu open. Plugins, Add and Add marketplace are boxed in red"></figure>
       </div>
     </li>
@@ -112,7 +114,7 @@ button.cp:hover { filter: brightness(1.08); }
       <div class="num" aria-hidden="true">3</div>
       <div class="body">
         <h2>Add from a repository</h2>
-        <p>In the box that opens, choose <b>Add from a repository</b>.</p>
+        <p>An <b>Add marketplace</b> box opens in the middle of the screen. Choose <b>Add from a repository</b>, the second option in that box.</p>
         <figure><img src="3-add-marketplace.png" alt="The Add marketplace box with two choices: Browse Anthropic sources, and Add from a repository"></figure>
       </div>
     </li>
@@ -121,7 +123,7 @@ button.cp:hover { filter: brightness(1.08); }
       <div class="num" aria-hidden="true">4</div>
       <div class="body">
         <h2>Type the Starfleet address</h2>
-        <p>Click the <b>URL</b> field and type this. Pick <b>starfleet</b> from the list when it shows up, then press <b>Sync</b>.</p>
+        <p>In the same box, click the <b>URL</b> field and type this. Pick <b>starfleet</b> from the list that drops down under the field, then press <b>Sync</b> in the bottom right corner of the box.</p>
         <div class="copy"><code id="addr">lorlola07/starfleet</code><button class="cp" id="cp" type="button">Copy</button></div>
         <figure><img src="5-pick.png" alt="The URL field with lorlola07/starfleet typed in, and starfleet by lorlola07 suggested in the list below it"></figure>
         <p class="ok"><b>Heads up:</b> the box warns you to only add marketplaces you trust. That's a normal check for any marketplace outside Anthropic's own. Pressing <b>Sync</b> adds Starfleet for you.</p>
@@ -132,35 +134,35 @@ button.cp:hover { filter: brightness(1.08); }
       <div class="num" aria-hidden="true">5</div>
       <div class="body">
         <h2>Open Claude Code, then type /starfleet</h2>
-        <p>Open Claude Code and type <code>/starfleet</code>.</p>
+        <p>Open Claude Code and type <code>/starfleet</code> in the message box at the bottom of the chat. The Starfleet console opens on the right side of the window.</p>
         <figure class="console"><img src="6-console.png" alt="The Starfleet console: the USS Claude header, a ship orbiting a purple planet, the stardate and condition, a grid of buttons, and the Captain's log block"></figure>
       </div>
     </li>
 
     <li class="alert" role="note">
       <span class="dot" aria-hidden="true"></span>
-      <div><b>Red alert: don't skip this one.</b> To get the most out of Starfleet, set up your hub. It's where your captain's log notes, crew and missions are saved, so without it your notes have nowhere to go.</div>
+      <div><b>Red alert: don't skip this one.</b> To get the most out of Starfleet, set up your hub. It's where your captain's log notes, crew and missions are saved, so without it your notes have nowhere to go.<br><br><b class="find">Find your hub any time:</b> in the Starfleet console on the right, press <b class="in">Captain's log</b> in the gold Captain's log block, then click <b class="in">Open Starfleet Command →</b> at the bottom of the log tab. It's also in the Claude app's left sidebar: click <b class="in">Artifacts</b> and open <b class="in">Starfleet Command</b>.</div>
     </li>
 
     <li class="step hub">
       <div class="num" aria-hidden="true">6</div>
       <div class="body">
         <h2>Set up your hub</h2>
-        <p>Under <b>Captain's log</b> in the console, press <b>Set up my hub</b>. Claude makes your own private Starfleet Command page on claude.ai, where your notes, crew and missions are saved.</p>
-        <p class="ok"><b>You'll know it worked</b> when Claude replies with a link to your new page and the button goes away. Notes you log from then on land there on their own.</p>
+        <p>In the Starfleet console on the right side of the window, find the gold <b>Captain's log</b> block, just below the stardate and its buttons. Press <b>Set up my hub</b> there. Claude makes your own private Starfleet Command page on claude.ai, where your notes, crew and missions are saved.</p>
+        <p class="ok"><b>You'll know it worked</b> when Claude replies in the chat with a link to your new page, and the Set up my hub button disappears from the Captain's log block. Notes you log from then on land there on their own.</p>
       </div>
     </li>
   </ol>
 
   <section class="box bug" aria-labelledby="h-bug">
     <h3 id="h-bug">One known bug. Want to help solve it?</h3>
-    <p>After you press a button in the console, scrolling can shiver in place. Press <b>Esc</b> and it stops right away.</p>
+    <p>After you press a button in the console, scrolling can shiver in place. Press <b>Esc</b> on your keyboard and it stops right away.</p>
     <p>We haven't cracked this one yet. If you like a good puzzle, the <a href="https://github.com/lorlola07/starfleet#known-issues">Known issues</a> section of the README has what we've tried so far, and you can share an idea or a fix on <a href="https://github.com/lorlola07/starfleet/issues">GitHub</a>.</p>
   </section>
 
   <section class="box alt" aria-labelledby="h-term">
     <h3 id="h-term">Using the terminal instead?</h3>
-    <p>Run this at a Claude Code prompt, say yes to adding the marketplace, then pick a scope:</p>
+    <p>Run this at the Claude Code prompt in your terminal, say yes to adding the marketplace, then pick a scope:</p>
     <p><code>/plugin install starfleet --marketplace lorlola07/starfleet</code></p>
   </section>
 

@@ -605,7 +605,7 @@ export function registerLog(on: On) {
             </Box>
           )
         })}
-        {hub ? <Link href={hub} label="Open Starfleet Command →" /> : <Text dimColor>No hub yet. Close mission in the console publishes your own Starfleet Command hub.</Text>}
+        {hub ? <Link href={hub} label="Open Starfleet Command →" /> : <Text dimColor>No hub yet. In the console, press Set up my hub in the gold Captain’s log block to make your own Starfleet Command hub.</Text>}
       </Box>
     )
   })
