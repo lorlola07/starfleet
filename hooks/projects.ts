@@ -3,7 +3,7 @@ import type { EngineInterface, On } from 'claude-code'
 import { basename, projectOf } from './shared'
 
 // The project map: folder name → project name, so chats in several folders file under one project
-// (MOD and Side Work both under "Starfleet mod"). Kept in $.store, keys in lower case. Records keep
+// (app and app-docs both under "Project A"). Kept in $.store, keys in lower case. Records keep
 // the folder name as saved and are named through the map when read, so changing the map relabels
 // old log entries and missions too. A folder not on the map is its own project.
 

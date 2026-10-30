@@ -3,7 +3,7 @@
 ## 0.4.15
 
 ### Added
-- **Project map:** chats from several folders file under one project in the log, missions, briefing and hub reports. Tell Claude "file the Side Work folder under Starfleet mod" to change it. Old entries and missions are relabeled too.
+- **Project map:** chats from several folders file under one project in the log, missions, briefing and hub reports. Tell Claude "file the docs folder under Project A" to change it. Old entries and missions are relabeled too.
 - **Close mission sorts by project:** closure items that belong to another project are filed there as a note, but only the ones you tick.
 - **Close mission refreshes the overview:** the project's overview in the hub is rewritten from all its chapters, ending with what's still open. If you edited it in the hub, Claude asks before replacing it.
 - **New hubs get project reports and Export PDF:** the hub a new install publishes groups missions into one report per project, with each chat as a chapter, and exports a record as a PDF.
