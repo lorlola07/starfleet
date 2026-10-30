@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.14
+
+### Added
+- **Update notice:** once a day the console checks GitHub, and when a newer Starfleet is out, a toast says so and how to update.
+
+### Changed
+- About gives every part its name in the heading color, so the parts are easy to tell apart.
+
 ## 0.4.13
 
 ### Fixed

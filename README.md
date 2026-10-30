@@ -67,6 +67,7 @@ What we know so far: it looks like the app keeps the pressed button in view on e
 - **Translator:** `/translator` sends the text you give it to Haiku, only when you use it.
 - **Hub sync:** Record and deleting a log entry write that note straight to your own hub page through Claude Code's ArtifactData tool, with no chat turn (if that's refused, Claude is asked instead). Close mission and Rescan + sync crew ask Claude to write your crew (project names and statuses) and mission records (including project paths and the files changed) there. Nothing is synced unless you press one of them.
 - **Crew scan:** to place crew on their decks, starfleet runs `git status` in your recent project folders, and `gh` for any cloud repos you pick.
+- **Update check:** once a day, starfleet reads its version file from GitHub (raw.githubusercontent.com) to see whether a newer version is out. Nothing about you is sent with it.
 - Everything else stays in Claude Code's local plugin storage on your computer.
 
 ## Install

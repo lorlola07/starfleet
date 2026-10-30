@@ -7,6 +7,7 @@ import { openAbout } from './about'
 import { DECKS, DECK_H, crewNow, crewSvg, openManageCrew, scanCrew } from './crew'
 import { hubUrl, isSettingUpHub, loadLogDraft, openLog, readLog, sendClosure, setUpHub } from './log'
 import { isAiOn, setAi, isBandOn, setBand } from './prefs'
+import { checkForUpdate } from './update'
 import { redAlertSvg, toggleRedAlert } from './ops'
 import { BADGE_H, BADGE_W, RANKS, SPRITES, SPRITE_COLORS, basename, pipsSvg, rankBadgeSvg, rankOf, stardate } from './shared'
 import { COURSE, courseOf, duration, readVoyage, updateVoyage } from './voyage'
@@ -118,6 +119,8 @@ export async function consoleSessionStart($: EngineInterface) {
   await $.command.register({ name: 'band', description: 'The strip above the prompt: /band off hides it, /band on shows it', immediate: true, argumentHint: 'on | off' }).catch(() => {})
   await $.command.register({ name: 'ai-summaries', description: 'Starfleet AI summaries: /ai-summaries off stops sending prompts and log notes to Haiku for titles and briefings; on turns them back on', immediate: true, argumentHint: 'on | off' }).catch(() => {})
   await $.command.register({ name: 'starfleet', description: 'Open the Starfleet console: viewscreen, briefing, crew decks, captain’s log, main engineering, service record. /starfleet focus shows only the comms badge', immediate: true }).catch(() => {})
+  // A newer version on GitHub gets one toast a day, behind everything else
+  void checkForUpdate($).catch(() => {})
   // Open the console unasked, without focus; narrow terminals hold it until /starfleet.
   // The crew scan runs behind it; the briefing (a model call) waits until asked for
   await loadPrefs($)

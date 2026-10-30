@@ -94,7 +94,7 @@ export function registerAbout(on: On) {
             <Text backgroundColor={HEAD_COLOR} color={LCARS.ink} bold> {g.title} </Text>
             {g.parts.map(p => (
               <Box key={p.name} flexDirection="column">
-                <Text><Text bold>{p.name}</Text>{p.keys && <Text dimColor>  {p.keys}</Text>}</Text>
+                <Text><Text bold color={HEAD_COLOR}>{p.name}</Text>{p.keys && <Text dimColor>  {p.keys}</Text>}</Text>
                 {p.what.map(line => <Text>{line}</Text>)}
                 <Text dimColor>↔ {p.links}</Text>
               </Box>

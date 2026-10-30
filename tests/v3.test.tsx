@@ -4,6 +4,7 @@ import { courseOf } from '../hooks/voyage'
 import { CREW_MAX, SPRITES, SPRITE_COLORS, SPRITE_ORDER, BADGE_W, LOG_CATEGORIES, rankBadgeSvg, splitCategory, rankOf, taggedTitle } from '../hooks/shared'
 import { onDark, stillSvg, viewscreenSvg } from '../hooks/theme'
 import { crewSvg } from '../hooks/crew'
+import { isNewer } from '../hooks/update'
 
 // The test runtime has timers; the mod's own types leave them out
 // $.tool.call through a plain signature: inferring each tool's input type is too deep for tsc
@@ -1721,4 +1722,41 @@ test('another mod holding /ai-summaries or /hub never stops /starfleet from regi
   } })
   await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
   for (const name of ['starfleet', 'log', 'crew', 'warp-core', 'bridge']) expect(registered).toContain(name)
+})
+
+test('a newer Starfleet on GitHub gets one toast a day that says how to update, and the same version none', async ($, on) => {
+  const toasts: string[] = []
+  const store = engine(on, undefined, undefined, { toasts })
+  let remote = '0.4.20'
+  const fetched: string[] = []
+  on('fs.read', (_: unknown, e: { path: string }) => ({ value: e.path.endsWith('plugin.json') ? '{"version":"0.4.14"}' : '' }))
+  on('http.fetch', (_: unknown, e: { url: string }) => { fetched.push(e.url); return { value: { status: 200, ok: true, headers: {}, text: `{"version":"${remote}"}` } } })
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await new Promise(done => setTimeout(done, 20))
+  expect(fetched).toEqual(['https://raw.githubusercontent.com/lorlola07/starfleet/main/.claude-plugin/plugin.json'])
+  expect(toasts.some(t => t.includes('0.4.20 is out') && t.includes('/plugin update starfleet'))).toBe(true)
+  // Checked today already: no second request
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await new Promise(done => setTimeout(done, 20))
+  expect(fetched.length).toBe(1)
+  // A day on, the same version as installed: a request but no toast
+  store.updateCheckedAt = 0
+  remote = '0.4.14'
+  const before = toasts.length
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await new Promise(done => setTimeout(done, 20))
+  expect(fetched.length).toBe(2)
+  expect(toasts.slice(before).some(t => t.includes('is out'))).toBe(false)
+  expect([isNewer('0.4.14', '0.4.9'), isNewer('0.4.9', '0.4.14'), isNewer('0.5', '0.4.99'), isNewer('0.4.14', '0.4.14')]).toEqual([true, false, true, false])
+})
+
+test('About gives every part its name in the heading color', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount(pane('starfleet-about', 'desktop'))
+  for (const name of ['Viewscreen', 'Shields', 'Starfleet Command hub']) {
+    const t = (await ui.findAll({ type: 'Text' })).find(x => x.text === name && (x.props as { bold?: boolean }).bold)
+    expect([name, (t?.props as { color?: string })?.color]).toEqual([name, '#ffcc99'])
+  }
+  await ui.unmount()
 })
