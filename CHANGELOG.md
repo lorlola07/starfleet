@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.13
+
+### Fixed
+- **Light mode:** every Starfleet pane keeps its dark LCARS background in the app's light mode, with its own text colors, so the ship name, stardate and headings stay readable. Buttons use the app's filled style, so they read in both modes.
+- The viewscreen ship and the gliding ship above the prompt carry on with the clock instead of snapping back to the start every second while Claude works. A focused console still holds its picture still.
+
 ## 0.4.12
 
 ### Added

@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import { TEST_OR_BUILD, stardate } from '../hooks/shared'
 import { courseOf } from '../hooks/voyage'
 import { CREW_MAX, SPRITES, SPRITE_COLORS, SPRITE_ORDER, BADGE_W, LOG_CATEGORIES, rankBadgeSvg, splitCategory, rankOf, taggedTitle } from '../hooks/shared'
-import { stillSvg, viewscreenSvg } from '../hooks/theme'
+import { onDark, stillSvg, viewscreenSvg } from '../hooks/theme'
 import { crewSvg } from '../hooks/crew'
 
 // The test runtime has timers; the mod's own types leave them out
@@ -1059,6 +1059,32 @@ test('an acknowledged briefing stays gone after a reload or reopening the consol
   await ui.unmount()
 })
 
+test('every pane sits on the dark LCARS background with its own text colors, so light mode looks the same', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
+  for (const id of ['starfleet-console', 'starfleet-crew', 'starfleet-log', 'starfleet-about', 'starfleet-core']) {
+    const ui = await $.ui.mount(pane(id, 'desktop'))
+    const boxes = await ui.findAll({ type: 'Box' })
+    expect([id, (boxes[0]?.props as { backgroundColor?: string }).backgroundColor]).toEqual([id, '#07070c'])
+    await ui.unmount()
+  }
+  // No text is left to follow the app's theme: top-level text gets the LCARS colors, dim text the dim
+  // one, and text inside a colored Text keeps inheriting its color
+  const painted = onDark({ type: 'Box', children: [
+    { type: 'Text', children: ['plain'] },
+    { type: 'Text', props: { dimColor: true }, children: ['quiet'] },
+    { type: 'Text', props: { color: '#ffcc99' }, children: ['peach', { type: 'Text', children: ['inherits'] }] },
+    { type: 'Text', props: { backgroundColor: '#ffcc99', color: '#000000' }, children: ['pill'] },
+  ] }) as { props: { backgroundColor: string }; children: { children: { props?: Record<string, unknown>; children?: { props?: unknown }[] }[] }[] }
+  expect(painted.props.backgroundColor).toBe('#07070c')
+  const [plain, quiet, peach, pill] = painted.children[0]!.children
+  expect(plain!.props).toEqual({ color: '#f1ece4' })
+  expect(quiet!.props).toEqual({ color: '#8c8a96' })
+  expect(peach!.children![1]!.props).toBeUndefined()
+  expect(pill!.props).toEqual({ backgroundColor: '#ffcc99', color: '#000000' })
+})
+
 test('every heading uses the one heading color, and the viewscreen keeps a roomy wide canvas', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
@@ -1095,9 +1121,11 @@ test('every heading uses the one heading color, and the viewscreen keeps a roomy
   expect(svg).toContain('viewBox="0 0 400 190"')
 })
 
-test('review: the console pictures are the same a day apart, so a redraw never reloads them', async ($, on) => {
-  // A picture whose source changes between redraws is reloaded and has no height for a moment,
-  // which pulls the scroll back a row (the shiver). The clock once set the viewscreen's delays
+test('review: a focused console keeps its pictures the same between redraws, and an unfocused one carries the orbit on with the clock', async ($, on) => {
+  // Focused, a picture whose source changes between redraws is reloaded and has no height for a
+  // moment, which pulls the scroll back a row (the shiver), so it holds still and never changes.
+  // Unfocused, the desktop still reloads it on every redraw (once a second while Claude works), so
+  // the orbit starts where the clock says instead of snapping back to the left edge each second
   engine(on)
   await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
   const p = pane('starfleet-console', 'desktop')
@@ -1108,17 +1136,24 @@ test('review: the console pictures are the same a day apart, so a redraw never r
     await ui.unmount()
     return { pics, text }
   }
+  const orbit = (pics: string[]) => pics.find(svg => svg.includes('STANDARD ORBIT'))?.match(/\.ship\{[^}]*\}/)?.[0]
   try {
-    for (const isFocused of [false, true]) {
-      pinnedNow = new Date(2026, 9, 27, 10, 54).getTime()
-      const before = await draw(isFocused)
-      pinnedNow = new Date(2026, 9, 28, 10, 54).getTime()
-      const after = await draw(isFocused)
-      // The clock did move for the console: the stardate turned over
-      expect(after.text).toContain('1028.26')
-      expect(after.pics.some(svg => svg.includes('STANDARD ORBIT'))).toBe(true)
-      expect(after.pics).toEqual(before.pics)
-    }
+    // Focused: a day and 7 seconds apart, every picture is the same source
+    pinnedNow = new Date(2026, 9, 27, 10, 54).getTime()
+    const before = await draw(true)
+    pinnedNow = new Date(2026, 9, 28, 10, 54, 7).getTime()
+    const after = await draw(true)
+    expect(after.text).toContain('1028.26')
+    expect(after.pics.some(svg => svg.includes('STANDARD ORBIT'))).toBe(true)
+    expect(after.pics).toEqual(before.pics)
+    // Unfocused: 7 seconds on, the ship's orbit starts 7 seconds further along
+    pinnedNow = new Date(2026, 9, 28, 10, 54, 0).getTime()
+    const start = orbit((await draw(false)).pics)
+    pinnedNow = new Date(2026, 9, 28, 10, 54, 7).getTime()
+    const later = orbit((await draw(false)).pics)
+    expect(start).not.toEqual(later)
+    const delay = (rule?: string) => Number(rule?.match(/animation-delay:(-?[\d.]+)s/)?.[1])
+    expect(Math.round((delay(start) - delay(later)) * 1000)).toBe(7000)
   } finally {
     pinnedNow = undefined
   }

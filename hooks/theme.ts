@@ -19,6 +19,31 @@ export const LCARS = {
   dim: '#8c8a96',
 } as const
 
+// Every pane keeps its dark LCARS look in the app's light mode too: the tree sits on a dark Box, and
+// text with no color of its own (which would follow the light theme to near-black) gets the LCARS
+// text color, or the dim one where it asked to be dim. Text inside a colored Text keeps inheriting
+type Node = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+export function onDark<T>(tree: T, filled = false): T {
+  const paint = (node: unknown, inText: boolean): unknown => {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return Array.isArray(node) ? node.map(n => paint(n, inText)) : node
+    const el = node as Node
+    let props = el.props
+    if (el.type === 'Text' && props?.color === undefined && props?.backgroundColor === undefined && (!inText || props?.dimColor)) {
+      const { dimColor, ...rest } = props ?? {}
+      props = { ...rest, color: dimColor ? LCARS.dim : LCARS.text }
+    }
+    // The desktop draws Buttons natively in the app's theme and ignores any color the mod gives them,
+    // so a plain one turns dark on dark in light mode. The app's own filled button reads in both
+    if (el.type === 'Button' && filled) {
+      const { plain, ...rest } = props ?? {}
+      return { ...el, props: { ...rest, variant: 'primary' } }
+    }
+    const children = el.children?.map(c => paint(c, inText || el.type === 'Text'))
+    return { ...el, ...(props ? { props } : {}), ...(children ? { children } : {}) }
+  }
+  return { type: 'Box', props: { flexDirection: 'column', backgroundColor: LCARS.space, paddingX: 1, paddingY: 1 }, children: [paint(tree, false)] } as T
+}
+
 // The one color for every heading: pane titles, section headings and their swatches. Warnings
 // (red alert, assimilation) keep their own colors, since the color is the message
 export const HEAD_COLOR = LCARS.peach
@@ -180,7 +205,7 @@ export const FILL_WIDTH = 1600
 // stay. The keyframes are left in; without a property naming them they do nothing
 export const stillSvg = (svg: string) => svg.replace(/animation(?:-delay)?:[^;}"]*;?/g, '')
 
-export function viewscreenSvg(project: string, tint: 'none' | 'red' | 'borg', planetId: string | undefined, color?: string): string {
+export function viewscreenSvg(project: string, tint: 'none' | 'red' | 'borg', planetId: string | undefined, color?: string, now?: number): string {
   // As wide as the ship's orbit needs and no wider, so the planet fills more of the frame
   const w = 400
   const h = 190
@@ -189,15 +214,19 @@ export function viewscreenSvg(project: string, tint: 'none' | 'red' | 'borg', pl
   const sky = tint === 'red' ? '#1d0707' : tint === 'borg' ? '#06140a' : '#05060f'
   const cx = Math.round(w / 2)
   const cy = 82
-  // Nothing here reads the clock: a source that changes between redraws is reloaded, has no
-  // height for a moment and pulls the scroll back a row (the shiver). Fixed delays only
+  // The desktop reloads the picture on every redraw, restarting its animations, and the console
+  // redraws once a second while Claude works: given the clock, each animation starts as far along
+  // its loop as the clock says, so the ship carries on instead of snapping back to the start. A
+  // focused console passes no clock: its picture is held still (stillSvg) and must stay the same
+  // source between redraws, or it shivers the scroll
+  const along = (loopMs: number, delayS = 0) => `${Number((delayS - (now === undefined ? 0 : (now % loopMs) / 1000)).toFixed(3))}s`
   let stars = ''
   let s = hashOf(project + 'stars')
   for (let i = 0; i < Math.round(w / 7); i++) {
     s = (s * 1103515245 + 12345) % 2147483648
     const x = s % w
     s = (s * 1103515245 + 12345) % 2147483648
-    stars += `<rect class="tw" style="animation-delay:${(s % 30) / 10}s" x="${x}" y="${s % h}" width="${s % 9 === 0 ? 2 : 1}" height="${s % 9 === 0 ? 2 : 1}" fill="#dfe6ff"/>`
+    stars += `<rect class="tw" style="animation-delay:${along(3000, (s % 30) / 10)}" x="${x}" y="${s % h}" width="${s % 9 === 0 ? 2 : 1}" height="${s % 9 === 0 ? 2 : 1}" fill="#dfe6ff"/>`
   }
   const ship = pixels(SHIP_ROWS, SHIP_PALETTE, 2)
   const art = spec.draw(cx, cy, 54, hue, color)
@@ -213,9 +242,9 @@ ${art.defs}</defs>
 .tw{animation:tw 3s ease-in-out infinite}
 @keyframes glow{0%,100%{opacity:.7}50%{opacity:1}}
 @keyframes spark{0%,70%,100%{opacity:.3}80%{opacity:1}}
-.ship{animation:orbit 16s linear infinite}
-.glow{animation:glow 2.4s ease-in-out infinite}
-.spark{animation:spark 2.4s steps(3) infinite}
+.ship{animation:orbit 16s linear infinite;animation-delay:${along(16000)}}
+.glow{animation:glow 2.4s ease-in-out infinite;animation-delay:${along(2400)}}
+.spark{animation:spark 2.4s steps(3) infinite;animation-delay:${along(2400)}}
 @media (prefers-reduced-motion:reduce){.tw,.ship,.glow,.spark{animation:none}.ship{transform:translate(${cx - 150}px,${cy - 6}px)}}
 </style>
 <g clip-path="url(#vs)">

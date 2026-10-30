@@ -310,7 +310,7 @@ export function registerConsole(on: On) {
             out. A plain image (not interactive) fills that space; its CSS orbit animation still runs */}
         <Box flexGrow={1} flexShrink={1} minWidth={0}>
           {hasSvg
-            ? <el.Svg source={pic(viewscreenSvg(project, tint, planet.id, crewColor))} alt={`Viewscreen: the ship in standard orbit around ${project}, a ${planet.name} planet`} />
+            ? <el.Svg source={pic(viewscreenSvg(project, tint, planet.id, crewColor, isHeld ? undefined : now))} alt={`Viewscreen: the ship in standard orbit around ${project}, a ${planet.name} planet`} />
             : <Text color={LCARS.blue} wrap="truncate">{`   ·   ✦     (◯) ${planet.name}   >=<    ·   ✦  `}</Text>}
         </Box>
         <Button key="planet-next" label="▶" plain dimColor onPress={() => cyclePlanet($, project, 1)} />

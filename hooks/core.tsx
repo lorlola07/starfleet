@@ -46,8 +46,11 @@ function stars(width: number, height: number, count: number, seed: number, color
   return out
 }
 
-function glideSvg(width: number, tint: 'none' | 'red' | 'borg'): string {
+function glideSvg(width: number, tint: 'none' | 'red' | 'borg', now: number): string {
   const h = 40
+  // Each redraw reloads the picture and restarts it, so every loop starts as far along as the clock
+  // says: the ship carries on across the strip instead of jumping back on a redraw
+  const along = (loopMs: number) => `${Number((-(now % loopMs) / 1000).toFixed(3))}s`
   const sky = tint === 'red' ? '#1d0707' : tint === 'borg' ? '#06140a' : '#070915'
   const far = stars(width, h, Math.round(width / 9), 7, '#6f7aa8')
   const near = stars(width, h, Math.round(width / 18), 13, '#e8ecff')
@@ -60,8 +63,8 @@ function glideSvg(width: number, tint: 'none' | 'red' | 'borg'): string {
 @keyframes glide{0%{transform:translate(-60px,9px)}100%{transform:translate(${width + 10}px,9px)}}
 @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
 @keyframes flame{0%,100%{opacity:1}50%{opacity:.35}}
-.far{animation:far 24s linear infinite}.near{animation:near 9s linear infinite}
-.ship{animation:glide 14s linear infinite}.bob{animation:bob .8s steps(2) infinite}
+.far{animation:far 24s linear infinite;animation-delay:${along(24000)}}.near{animation:near 9s linear infinite;animation-delay:${along(9000)}}
+.ship{animation:glide 14s linear infinite;animation-delay:${along(14000)}}.bob{animation:bob .8s steps(2) infinite}
 .flame{animation:flame .25s steps(2) infinite}
 @media (prefers-reduced-motion:reduce){.far,.near,.ship,.bob,.flame{animation:none}.ship{transform:translate(${Math.round(width / 2)}px,9px)}}
 </style>
@@ -317,7 +320,7 @@ export function registerCore(on: On) {
       return beside('Svg' in el
         // The frame gets the picture's own height: left to itself an interactive frame takes a tall
         // default and leaves dead space above and below the strip
-        ? <el.Svg source={glideSvg(width, tint)} alt="An 8-bit starship gliding through stars" height={40} isInteractive />
+        ? <el.Svg source={glideSvg(width, tint, await $.clock.now())} alt="An 8-bit starship gliding through stars" height={40} isInteractive />
         : <Text color={LCARS.violet}>{'  ·   ✦      ·  >=<   ·    ✦  '}</Text>)
     }
     if (alert.isOn) {

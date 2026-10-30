@@ -5,7 +5,7 @@ import type { ServiceRecord } from '../types'
 import { consoleSessionStart, registerConsole, rememberOrder } from './console'
 import { coreSessionStart, registerCore } from './core'
 import { RANKS, errText, hashOf, pipsSvg, rankOf, serial } from './shared'
-import { HEAD_COLOR, LCARS, hail } from './theme'
+import { HEAD_COLOR, LCARS, hail, onDark } from './theme'
 import { registerAbout } from './about'
 import { crewSessionStart, crewTurnComplete, registerCrew } from './crew'
 import { logSessionStart, logTyping, missionTurnComplete, recordsJson, registerLog } from './log'
@@ -115,6 +115,12 @@ async function loadRecord($: EngineInterface) {
 }
 
 export const register: Register = on => {
+  // Every starfleet pane on a dark background, in the app's light mode too (see onDark). Registered
+  // first, so it wraps what each pane's own hook draws
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    const tree = await next(e)
+    return typeof e.requestId === 'string' && e.requestId.startsWith('starfleet') && tree ? onDark(tree, e.surface !== 'terminal') : tree
+  })
   // 13-20 live in ops.tsx; the takeover, warp core, captain's log and crew decks in their own files
   registerOps(on)
   registerTakeover(on)
