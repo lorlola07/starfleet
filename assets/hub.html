@@ -244,7 +244,7 @@ dialog.viewer iframe { width: 100%; height: 78vh; border: 0; background: #fff; b
       </form>
       <div class="nb">
         <nav class="tree" id="tree" aria-label="Notebook"><div class="none">Connecting…</div></nav>
-        <div class="page" id="page"><p class="hint">Pick a project or note on the left.</p></div>
+        <div class="page" id="page"><p class="hint">Open a project to see its notes.</p></div>
       </div>
     </section>
 
@@ -321,8 +321,9 @@ let db = null;
 const store = { get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
 // Which category a project's Captain's log shows: 'all' or one id, kept in this browser
 let logCat = store.get('nb-logcat', 'all');
-let sel = store.get('nb-sel', null);          // {kind:'project'|'folder'|'note'|'log'|'logf', id, project}
-const open = new Set(store.get('nb-open', []));
+// Every load starts closed: no note open, every project and folder folded
+let sel = null;          // {kind:'project'|'folder'|'note'|'log'|'logf', id, project}
+const open = new Set();
 let paneKey = null, saveTimer = null, pending = null;
 
 const docs = s => s.docs.map(d => ({ id: d.id, ...(d.data() || {}) }));
@@ -343,11 +344,11 @@ function folderPath(fid) {
   return out;
 }
 function setSel(s) {
-  flush(); sel = s; store.set('nb-sel', s); renderTree(); renderPane();
+  flush(); sel = s; renderTree(); renderPane();
   // On a phone the page sits under the tree: bring what was just opened into view
   if (s && matchMedia('(max-width: 760px)').matches && document.activeElement?.closest?.('#tree')) $('page').scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
 }
-function toggle(key, force) { const on = force ?? !open.has(key); on ? open.add(key) : open.delete(key); store.set('nb-open', [...open]); }
+function toggle(key, force) { const on = force ?? !open.has(key); on ? open.add(key) : open.delete(key); }
 function context() {
   if (!sel) return { project: projectNames()[0] || UNFILED, folder: '' };
   if (sel.kind === 'folder') { const f = folderById(sel.id); return { project: f ? projOf(f) : sel.project, folder: sel.id }; }
@@ -485,7 +486,7 @@ function renderPane() {
   if (sel?.kind === 'note' && paneKey === key) { refreshNote(); return; }
   if (paneKey === key && host.contains(document.activeElement) && document.activeElement.matches('input,textarea,select')) return;
   paneKey = key;
-  if (!sel) { host.replaceChildren(el('p', 'hint', 'Pick a project or note on the left.')); return; }
+  if (!sel) { host.replaceChildren(el('p', 'hint', 'Open a project to see its notes.')); return; }
 
   if (sel.kind === 'note') {
     const n = noteById(sel.id);
@@ -669,7 +670,7 @@ async function deleteProject(p) {
       await db.collection('log').doc(e.id).delete();
     }
   } catch { $('status').textContent = 'Could not delete all of ' + p + '. Check your connection.'; return; }
-  open.delete('p:' + p); store.set('nb-open', [...open]);
+  open.delete('p:' + p);
   setSel(null);
 }
 // A deleted mission is remembered in missionDeleted, so the next sync from Claude Code skips it
@@ -678,7 +679,7 @@ async function deleteMission(v) {
     await db.collection('missionDeleted').doc(v.id).set({ at: Date.now(), project: v.project || '' });
     await db.collection('missions').doc(v.id).delete();
   } catch { $('status').textContent = 'Could not delete that mission. Check your connection.'; return; }
-  misSel = null; store.set('mis-sel', null);
+  misSel = null;
 }
 /* ---------- Pinned files: your own docs, images and PDFs, pinned to a project or folder ---------- */
 let assets = null;
@@ -802,9 +803,10 @@ function crewMark(v, w) {
   m.append(el('span', '', [v.tag, v.crewName].filter(Boolean).join(' ')));
   return m;
 }
-let missions = [], misSel = store.get('mis-sel', null);
-/* Mission history by project: one report per project, and each chat (a handoff or a new chat) as a chapter in it */
-let projSel = store.get('mis-proj', null), reports = {}, editingOverview = null;
+let missions = [], misSel = null;
+/* Mission history by project: one report per project, and each chat (a handoff or a new chat) as a chapter in it.
+   Every load starts with all reports closed */
+let projSel = null, reports = {}, editingReport = null;
 const projectOfMission = v => v.project || UNFILED;
 const lastAt = g => Math.max(...g.missions.map(v => v.endedAt || v.at || 0));
 function projectGroups(list) {
@@ -815,7 +817,7 @@ function projectGroups(list) {
 function renderMissions(list) {
   missions = list;
   const host = $('mis'), groups = projectGroups(list);
-  if (projSel && !groups.some(g => g.project === projSel)) { projSel = null; store.set('mis-proj', null); }
+  if (projSel && !groups.some(g => g.project === projSel)) { projSel = null; }
   $('n-mis').textContent = list.length ? `${groups.length} project${groups.length === 1 ? '' : 's'} · ${list.length} missions` : '';
   $('b-xall').hidden = !downloads || !list.length;
   renderRecord();
@@ -825,7 +827,7 @@ function renderMissions(list) {
     const latest = g.missions[g.missions.length - 1], n = g.missions.length;
     row.setAttribute('aria-current', g.project === projSel ? 'true' : 'false');
     row.setAttribute('aria-label', 'Open project report: ' + g.project);
-    row.onclick = () => { projSel = projSel === g.project ? null : g.project; misSel = null; store.set('mis-proj', projSel); store.set('mis-sel', null); renderMissions(missions); if (projSel) $('mis-rec').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
+    row.onclick = () => { projSel = projSel === g.project ? null : g.project; misSel = null; renderMissions(missions); if (projSel) $('mis-rec').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
     row.append(el('div', 'sd', latest.stardate || '—'));
     const t = el('div', 'txt'); const mk = crewMark(latest, 14); if (mk) t.append(mk, ' '); t.append(el('b', 'pname', g.project)); t.append(' ', el('span', 'proj', latest.summary || '')); row.append(t);
     const pills = el('div'); pills.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
@@ -841,8 +843,11 @@ function renderProject(g) {
   const host = $('mis-rec'), ms = g.missions, latest = ms[ms.length - 1], key = slug(g.project);
   const rec = el('article', 'rec'); rec.setAttribute('aria-label', 'Project report: ' + g.project);
   const head = el('div', 'rec-head'), tools = el('div', 'rec-tools');
+  const r = reports[key];
+  // Edit report sits first in the report's top bar, where it's easy to find
+  if (db && editingReport !== g.project) tools.append(btn('p', 'Edit report', () => { editingReport = g.project; renderRecord(); }));
   if (downloads) tools.append(btn('o', 'Export PDF', () => exportPdf(rec, `project-${key}.pdf`)));
-  tools.append(btn('ghost', 'Hide report', () => { projSel = null; store.set('mis-proj', null); renderMissions(missions); }));
+  tools.append(btn('ghost', 'Hide report', () => { projSel = null; renderMissions(missions); }));
   head.append(el('div', 'crumb'), el('h3', '', g.project), tools);
   head.firstChild.append(el('b', '', 'Project report'), ` · ${ms.length} chapter${ms.length === 1 ? '' : 's'}`);
   rec.append(head);
@@ -854,35 +859,55 @@ function renderProject(g) {
     fact('Turns', String(sum(v => v.turns))), fact('Commits', String(sum(v => v.warpCore?.commits))), fact('Handoffs', String(sum(v => v.handoffs))));
   rec.append(facts);
 
-  const r = reports[key], ov = [];
-  if (editingOverview === g.project) {
-    const f = el('form', 'ed'), ta = el('textarea', 'big'); ta.value = r?.overview || ''; ta.setAttribute('aria-label', 'Project overview');
-    const save = el('button', 'btn p', 'Save'); save.type = 'submit';
-    const state = el('span', 'toast'); state.setAttribute('role', 'status');
-    const acts = el('div', 'actions'); acts.append(save, btn('ghost', 'Cancel', () => { editingOverview = null; renderRecord(); }), state);
-    f.append(ta, acts);
-    f.onsubmit = async e => { e.preventDefault(); if (!db) return; save.disabled = true; state.textContent = 'Saving…';
-      try { await db.collection('reports').doc(key).set({ project: g.project, overview: ta.value.trim(), updatedAt: Date.now() }); editingOverview = null; renderRecord(); }
-      catch { save.disabled = false; state.className = 'toast err'; state.textContent = 'Not saved. Check your connection.'; } };
-    f.onkeydown = e => { if (e.key === 'Escape') { editingOverview = null; renderRecord(); } };
-    ov.push(f); setTimeout(() => ta.focus(), 0);
-  } else {
-    ov.push(r?.overview ? el('p', 'ov', r.overview) : el('p', 'hint', 'No overview yet.'));
-    if (db) ov.push(el('div', 'actions', null)), ov[ov.length - 1].append(btn('p', r?.overview ? 'Edit overview' : 'Write overview', () => { editingOverview = g.project; renderRecord(); }));
-  }
-  rec.append(block('Overview', 'sm', ...ov));
-
-  const del = [];
-  ms.forEach((v, i) => { const d = v.closure?.delivered; if (!Array.isArray(d) || !d.length) return;
-    del.push(el('div', 'cl-sub', `Chapter ${i + 1} · SD ${v.stardate || '—'}`)); const ul = el('ul', 'cl-list'); d.forEach(x => ul.append(el('li', '', String(x)))); del.push(ul); });
-  rec.append(block('Delivered across chapters', 'cl', ...(del.length ? del : [el('p', 'hint', 'No closure reports yet.')])));
-
   // What's open comes from the latest chapter with a closure report: older open items were picked up or carried forward
-  const lc = [...ms].reverse().find(v => v.closure), open = [];
-  if (lc?.closure?.openItems?.length) { open.push(el('div', 'cl-sub', `From chapter ${ms.indexOf(lc) + 1} · SD ${lc.stardate || '—'}`)); const ul = el('ul', 'cl-list'); lc.closure.openItems.forEach(x => ul.append(el('li', '', String(x)))); open.push(ul); }
-  else open.push(el('p', 'hint', 'Nothing open.'));
-  if (lc?.closure?.nextStep && lc.closure.nextStep !== 'None') open.push(el('div', 'cl-sub', 'Next step'), el('p', '', lc.closure.nextStep));
-  rec.append(block('Still open', 'wc', ...open));
+  const lc = [...ms].reverse().find(v => v.closure);
+  if (editingReport === g.project) { rec.append(block('Edit report', 'sm', reportEditor(g, key, lc))); }
+  else {
+    rec.append(block('Overview', 'sm', r?.overview ? el('p', 'ov', r.overview) : el('p', 'hint', db ? 'No overview yet. Press Edit report at the top to write one.' : 'No overview yet.')));
+
+    const del = [];
+    ms.forEach((v, i) => { const d = v.closure?.delivered; if (!Array.isArray(d) || !d.length) return;
+      del.push(el('div', 'cl-sub', `Chapter ${i + 1} · SD ${v.stardate || '—'}`)); const ul = el('ul', 'cl-list'); d.forEach(x => ul.append(el('li', '', String(x)))); del.push(ul); });
+    rec.append(block('Delivered across chapters', 'cl', ...(del.length ? del : [el('p', 'hint', 'No closure reports yet.')])));
+
+    const open = [];
+    if (lc?.closure?.openItems?.length) { open.push(el('div', 'cl-sub', `From chapter ${ms.indexOf(lc) + 1} · SD ${lc.stardate || '—'}`)); const ul = el('ul', 'cl-list'); lc.closure.openItems.forEach(x => ul.append(el('li', '', String(x)))); open.push(ul); }
+    else open.push(el('p', 'hint', 'Nothing open.'));
+    if (lc?.closure?.nextStep && lc.closure.nextStep !== 'None') open.push(el('div', 'cl-sub', 'Next step'), el('p', '', lc.closure.nextStep));
+    rec.append(block('Still open', 'wc', ...open));
+  }
+
+  // Everything a chapter's record shows, added up across the project's chapters, each name listed once
+  const w = f => sum(v => v.warpCore?.[f]), peak = Math.max(...ms.map(v => v.warpCore?.peakContext ?? v.peakContext ?? -1));
+  const files = [...new Set(ms.flatMap(v => v.files || []))];
+  const core = el('div', 'facts');
+  core.append(fact('Station orders', String(w('orders'))), fact('Time at warp', span(w('warpMs'))),
+    fact('Peak context', peak >= 0 ? peak + '%' : '—', peak >= 85 ? 'bad' : ''), fact('Sensor sweeps', String(w('scans'))),
+    fact('Files changed', String(files.length)), fact('Green builds', String(w('greenBuilds')), w('greenBuilds') ? 'good' : ''),
+    fact('Red alerts', String(sum(v => v.redAlerts)), sum(v => v.redAlerts) ? 'bad' : ''));
+  rec.append(block('Warp core across chapters', 'wc', core));
+  const once = k => [...new Set(ms.flatMap(v => v[k] || []))];
+  const tally = {}; ms.forEach(v => Object.entries(v.tools || {}).forEach(([t, n]) => { tally[t] = (tally[t] || 0) + (Number(n) || 0); }));
+  const grid = el('div', 'rec-grid');
+  grid.append(block('Models used', '', chips(once('models'), 'm', 'Not recorded.')),
+    block('Plugins used', '', chips(once('plugins'), 'p', 'Not recorded.')),
+    block('Skills loaded', '', chips(once('skills'), 's', 'None loaded.')));
+  if (once('agents').length) grid.append(block('Away teams sent', '', chips(once('agents'), 's', '')));
+  if (once('mcpServers').length) grid.append(block('Connectors', '', chips(once('mcpServers'), 'p', '')));
+  grid.append(block('Stations used', '', chips(Object.entries(tally).sort((a, b) => b[1] - a[1]).slice(0, 14), '', 'Not recorded.')));
+  rec.append(grid);
+  const shots = ms.flatMap(v => v.moments || []).filter(x => x && typeof x.url === 'string' && safeUrl(x.url));
+  if (shots.length) {
+    const g = el('div', 'shots');
+    shots.forEach(x => { const a = el('button'); a.type = 'button';
+      const img = el('img'); img.src = x.url; img.alt = x.caption || 'Mission moment'; img.loading = 'lazy';
+      a.append(img, el('span', 'c', x.caption || 'Moment'), el('span', 'k', x.at ? when(x.at) : ''));
+      a.onclick = () => openViewer({ url: x.url, name: x.caption || 'Moment', type: 'image/png' });
+      g.append(a); });
+    rec.append(block('Moments', 'mo', g));
+  }
+  // Home folders shorten to ~, so long paths stay readable
+  if (files.length) { const ul = el('ul', 'files'); files.forEach(f => ul.append(el('li', '', String(f).replace(/^\/(?:Users|home)\/[^/]+/, '~')))); rec.append(block('Files changed across chapters', 'fl', ul)); }
 
   const list = el('div', 'list');
   ms.forEach((v, i) => { const row = el('button', 'row open'); row.type = 'button';
@@ -893,10 +918,55 @@ function renderProject(g) {
     if (v.handoffs) pills.append(el('span', 'pill ho', v.handoffs + ' handoff' + (v.handoffs > 1 ? 's' : '')));
     pills.append(el('span', 'pill closed', 'closed' + (v.closure?.outcome && v.closure.outcome !== 'complete' ? ' · ' + v.closure.outcome : '')));
     row.append(pills);
-    row.onclick = () => { misSel = v.id; store.set('mis-sel', misSel); renderRecord(); $('mis-rec').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
+    row.onclick = () => { misSel = v.id; renderRecord(); $('mis-rec').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
     list.append(row); });
   rec.append(block('Chapters', 'fl', list));
   host.replaceChildren(rec);
+}
+
+// Edit report: the overview, what each chapter delivered, and what's still open, in one form.
+// Delivered, open items and the next step live on their chapters, so saving writes them back there
+function reportEditor(g, key, lc) {
+  const ms = g.missions, r = reports[key], f = el('form', 'ed');
+  const field = (label, node, hint) => { const l = el('label', '', label); if (hint) l.append(el('small', '', hint)); l.append(node); return l; };
+  // Each box grows to fit what's in it, so long lists don't scroll inside a small box
+  const fit = t => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 2 + 'px'; };
+  const area = (val, cls) => { const t = el('textarea', cls); t.value = val || ''; t.addEventListener('input', () => fit(t)); return t; };
+  const fOv = area(r?.overview, 'big');
+  f.append(field('Overview', fOv));
+  const dels = ms.filter(v => v.closure).map(v => [v, area((v.closure.delivered || []).join('\n'))]);
+  dels.forEach(([v, t]) => f.append(field(`Delivered · Chapter ${ms.indexOf(v) + 1} · SD ${v.stardate || '—'}`, t, 'One per line')));
+  let fOpen, fNext;
+  if (lc) {
+    fOpen = area((lc.closure.openItems || []).join('\n'));
+    fNext = area(lc.closure.nextStep && lc.closure.nextStep !== 'None' ? lc.closure.nextStep : ''); fNext.maxLength = 300;
+    const pair = el('div', 'pair'); pair.append(field('Still open', fOpen, `One per line · chapter ${ms.indexOf(lc) + 1}`), field('Next step', fNext));
+    f.append(pair);
+  } else f.append(el('p', 'hint', 'Delivered and Still open fill in once a chapter has a closure report.'));
+  const save = el('button', 'btn p', 'Save'); save.type = 'submit';
+  const state = el('span', 'toast'); state.setAttribute('role', 'status');
+  const done = () => { editingReport = null; renderRecord(); };
+  const acts = el('div', 'actions'); acts.append(save, btn('ghost', 'Cancel', done), state);
+  f.append(acts);
+  f.onsubmit = async e => {
+    e.preventDefault(); if (!db) return;
+    save.disabled = true; state.className = 'toast saving'; state.textContent = 'Saving…';
+    const now = Date.now(), writes = [db.collection('reports').doc(key).set({ project: g.project, overview: fOv.value.trim(), updatedAt: now })];
+    // Only chapters whose lists changed are written, marked as edited by hand
+    const same = (a, b) => JSON.stringify(a || []) === JSON.stringify(b || []);
+    const patch = new Map();
+    dels.forEach(([v, t]) => { const d = lines(t.value); if (!same(d, v.closure.delivered)) patch.set(v.id, { ...v.closure, delivered: d }); });
+    if (lc) {
+      const o = lines(fOpen.value), n = fNext.value.trim() || 'None', c = patch.get(lc.id) || { ...lc.closure };
+      if (!same(o, lc.closure.openItems) || n !== (lc.closure.nextStep || 'None')) patch.set(lc.id, { ...c, openItems: o, nextStep: n });
+    }
+    patch.forEach((closure, id) => writes.push(db.collection('missions').doc(id).update({ closure, editedAt: now })));
+    try { await Promise.all(writes); done(); }
+    catch { save.disabled = false; state.className = 'toast err'; state.textContent = 'Not saved. Check your connection.'; }
+  };
+  f.onkeydown = e => { if (e.key === 'Escape') done(); };
+  setTimeout(() => { f.querySelectorAll('textarea').forEach(fit); fOv.focus(); }, 0);
+  return f;
 }
 
 /* The full record of one mission, opened from its row */
@@ -1013,7 +1083,9 @@ function renderEditor(v) {
 
 function renderRecord() {
   const host = $('mis-rec'), v = missions.find(m => m.id === misSel);
-  if (!v) { editing = null; const g = projSel && projectGroups(missions).find(x => x.project === projSel); if (g) renderProject(g); else host.replaceChildren(); return; }
+  if (!v) { editing = null; const g = projSel && projectGroups(missions).find(x => x.project === projSel);
+    if (g && editingReport === g.project && host.querySelector('form.ed')) return;
+    if (g) renderProject(g); else host.replaceChildren(); return; }
   // Live updates must not wipe what's being typed
   if (editing === v.id) { if (!host.querySelector('form.ed')) renderEditor(v); return; }
   editing = null;
@@ -1023,8 +1095,8 @@ function renderRecord() {
   if (downloads) recTools.append(btn('o', 'Export', () => exportMd(`mission-${slug(v.project)}-${v.stardate || v.id}.md`, missionMd(v))),
     btn('o', 'Export PDF', () => exportPdf(rec, `mission-${slug(v.project)}-${v.stardate || v.id}.pdf`)));
   // A chapter opened from its project report goes back to that report
-  if (projSel && projectOfMission(v) === projSel) recTools.append(btn('ghost', '‹ ' + projSel + ' report', () => { misSel = null; store.set('mis-sel', null); renderRecord(); }));
-  recTools.append(btn('ghost', 'Hide record', () => { misSel = null; store.set('mis-sel', null); renderMissions(missions); }),
+  if (projSel && projectOfMission(v) === projSel) recTools.append(btn('ghost', '‹ ' + projSel + ' report', () => { misSel = null; renderRecord(); }));
+  recTools.append(btn('ghost', 'Hide record', () => { misSel = null; renderMissions(missions); }),
     armDelete('Delete mission', () => deleteMission(v)));
   head.append(el('div', 'crumb'), el('h3', '', v.summary || 'Mission' + (v.project ? ' in ' + v.project : '')), recTools);
   head.firstChild.append(el('b', '', v.project || 'Unknown project'), ' · Stardate ' + (v.stardate || '—') + (v.cwd ? ' · ' + v.cwd : ''));
@@ -1119,7 +1191,7 @@ function renderRecord() {
   db.collection('pins').orderBy('at', 'desc').limit(300).onSnapshot(s => { S.pins = docs(s); refreshPins(); }, fail);
   window.claude?.use?.('assets').then(a => { assets = a; refreshPins(); }).catch(() => {});
   db.collection('missions').orderBy('at', 'desc').limit(100).onSnapshot(s => renderMissions(docs(s)), fail);
-  db.collection('reports').orderBy('updatedAt', 'desc').limit(100).onSnapshot(s => { reports = Object.fromEntries(docs(s).map(d => [d.id, d])); if (!editingOverview) renderRecord(); }, () => {});
+  db.collection('reports').orderBy('updatedAt', 'desc').limit(100).onSnapshot(s => { reports = Object.fromEntries(docs(s).map(d => [d.id, d])); if (!editingReport) renderRecord(); }, () => {});
 })();
 </script>
 
