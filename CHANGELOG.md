@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.17
+
+### Fixed
+- **Edit report keeps your typing:** leaving the form with unsaved changes now stops and asks. Cancel, Esc, Hide report, another project and a chapter all show **Discard changes** instead of dropping what you typed. Coming back to a report no longer reopens the form.
+- **Keyboard focus:** after Save, Cancel or Esc in Edit report, focus returns to the Edit report button.
+- **Reports with an odd closure:** if a chapter's delivered or open items were saved as plain text instead of a list, the report still opens and shows them.
+- **Wording:** counts read "1 note", "1 log entry", "1 mission" and "1 turn". A chapter with a closure report but nothing delivered says "Nothing listed as delivered."
+- **Save errors** now show in red.
+
+Your hub page is your own copy, so ask Claude to republish it from `assets/hub.html` to get these.
+
 ## 0.4.16
 
 ### Changed

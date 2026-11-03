@@ -208,6 +208,7 @@ dialog.viewer iframe { width: 100%; height: 78vh; border: 0; background: #fff; b
 .mis-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .mis-head .nb-tools { margin-left: auto; }
 .toast { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.toast.err { color: var(--red); }
 .rec.capturing .files { max-height: none; overflow: visible; }
 .mis .row .pname { font-family: var(--display); font-size: 17px; letter-spacing: .04em; text-transform: uppercase; font-weight: 400; color: var(--fg); }
 .rec p.ov { white-space: pre-wrap; font-size: 17px; }
@@ -327,6 +328,9 @@ const open = new Set();
 let paneKey = null, saveTimer = null, pending = null;
 
 const docs = s => s.docs.map(d => ({ id: d.id, ...(d.data() || {}) }));
+// A closure's lists are written by Claude, so a single string still reads as a list
+const arr = x => Array.isArray(x) ? x : x ? [x] : [];
+const count = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 const projOf = v => v.project || UNFILED;
 const noteById = id => S.notes.find(n => n.id === id);
 const folderById = id => S.folders.find(f => f.id === id);
@@ -441,7 +445,7 @@ function renderTree() {
   if (dragging) { treeStale = true; return; }
   treeStale = false;
   const host = $('tree'), names = projectNames();
-  $('n-log').textContent = `${S.notes.length} notes · ${S.log.length} log entries`;
+  $('n-log').textContent = `${count(S.notes.length, 'note')} · ${count(S.log.length, 'log entry', 'log entries')}`;
   if (!names.length) { host.replaceChildren(el('div', 'none', 'No projects yet. Press + Project to start one, or + Note to start writing.')); return; }
   const ul = el('ul');
   names.forEach(p => {
@@ -565,10 +569,10 @@ function renderPane() {
     parts.push(name);
   } else parts.push(el('div', 'field title', project));
   const logs = isFolder ? 0 : S.log.filter(e => projOf(e) === project).length;
-  parts.push(el('p', 'hint', [`${notes.length} note${notes.length === 1 ? '' : 's'}`, subs.length ? `${subs.length} folder${subs.length === 1 ? '' : 's'}` : '', logs ? `${logs} log entries` : ''].filter(Boolean).join(' · ')));
+  parts.push(el('p', 'hint', [count(notes.length, 'note'), subs.length ? count(subs.length, 'folder') : '', logs ? count(logs, 'log entry', 'log entries') : ''].filter(Boolean).join(' · ')));
   parts.push(pinnedBlock(project, fid));
   if (subs.length) { const g = el('div', 'cards');
-    subs.forEach(s => { const b = el('button'); b.type = 'button'; b.append(el('span', 't', '▸ ' + (s.name || 'Folder')), el('span', 'x', S.notes.filter(n => n.folder === s.id).length + ' notes'));
+    subs.forEach(s => { const b = el('button'); b.type = 'button'; b.append(el('span', 't', '▸ ' + (s.name || 'Folder')), el('span', 'x', count(S.notes.filter(n => n.folder === s.id).length, 'note')));
       b.onclick = () => { toggle('f:' + s.id, true); setSel({ kind: 'folder', id: s.id, project }); }; g.append(b); });
     parts.push(g); }
   parts.push(notes.length ? noteCards(notes.sort(byOrder)) : el('p', 'hint', 'Nothing here yet.'));
@@ -807,6 +811,11 @@ let missions = [], misSel = null;
 /* Mission history by project: one report per project, and each chat (a handoff or a new chat) as a chapter in it.
    Every load starts with all reports closed */
 let projSel = null, reports = {}, editingReport = null;
+// Set while the Edit report form is open: anything that would leave it goes through leaveReport,
+// which stops and asks when there's typing that would be lost
+let reportGuard = null;
+const leaveReport = go => reportGuard ? reportGuard(go) : go();
+const closeReportForm = () => { editingReport = null; reportGuard = null; };
 const projectOfMission = v => v.project || UNFILED;
 const lastAt = g => Math.max(...g.missions.map(v => v.endedAt || v.at || 0));
 function projectGroups(list) {
@@ -817,8 +826,8 @@ function projectGroups(list) {
 function renderMissions(list) {
   missions = list;
   const host = $('mis'), groups = projectGroups(list);
-  if (projSel && !groups.some(g => g.project === projSel)) { projSel = null; }
-  $('n-mis').textContent = list.length ? `${groups.length} project${groups.length === 1 ? '' : 's'} · ${list.length} missions` : '';
+  if (projSel && !groups.some(g => g.project === projSel)) { projSel = null; closeReportForm(); }
+  $('n-mis').textContent = list.length ? `${count(groups.length, 'project')} · ${count(list.length, 'mission')}` : '';
   $('b-xall').hidden = !downloads || !list.length;
   renderRecord();
   if (!list.length) return;
@@ -827,12 +836,12 @@ function renderMissions(list) {
     const latest = g.missions[g.missions.length - 1], n = g.missions.length;
     row.setAttribute('aria-current', g.project === projSel ? 'true' : 'false');
     row.setAttribute('aria-label', 'Open project report: ' + g.project);
-    row.onclick = () => { projSel = projSel === g.project ? null : g.project; misSel = null; renderMissions(missions); if (projSel) $('mis-rec').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
+    row.onclick = () => leaveReport(() => { projSel = projSel === g.project ? null : g.project; misSel = null; renderMissions(missions); if (projSel) $('mis-rec').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); });
     row.append(el('div', 'sd', latest.stardate || '—'));
     const t = el('div', 'txt'); const mk = crewMark(latest, 14); if (mk) t.append(mk, ' '); t.append(el('b', 'pname', g.project)); t.append(' ', el('span', 'proj', latest.summary || '')); row.append(t);
     const pills = el('div'); pills.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
-    pills.append(el('span', 'pill', n + ' chapter' + (n === 1 ? '' : 's')), el('span', 'pill', g.missions.reduce((x, v) => x + (v.turns || 0), 0) + ' turns'));
-    const open = [...g.missions].reverse().find(v => v.closure)?.closure?.openItems?.length || 0;
+    pills.append(el('span', 'pill', n + ' chapter' + (n === 1 ? '' : 's')), el('span', 'pill', count(g.missions.reduce((x, v) => x + (v.turns || 0), 0), 'turn')));
+    const open = arr([...g.missions].reverse().find(v => v.closure)?.closure?.openItems).length;
     if (open) pills.append(el('span', 'pill ho', open + ' open'));
     row.append(pills); wrap.append(row); });
   host.replaceChildren(wrap);
@@ -847,7 +856,7 @@ function renderProject(g) {
   // Edit report sits first in the report's top bar, where it's easy to find
   if (db && editingReport !== g.project) tools.append(btn('p', 'Edit report', () => { editingReport = g.project; renderRecord(); }));
   if (downloads) tools.append(btn('o', 'Export PDF', () => exportPdf(rec, `project-${key}.pdf`)));
-  tools.append(btn('ghost', 'Hide report', () => { projSel = null; renderMissions(missions); }));
+  tools.append(btn('ghost', 'Hide report', () => leaveReport(() => { projSel = null; renderMissions(missions); })));
   head.append(el('div', 'crumb'), el('h3', '', g.project), tools);
   head.firstChild.append(el('b', '', 'Project report'), ` · ${ms.length} chapter${ms.length === 1 ? '' : 's'}`);
   rec.append(head);
@@ -866,12 +875,12 @@ function renderProject(g) {
     rec.append(block('Overview', 'sm', r?.overview ? el('p', 'ov', r.overview) : el('p', 'hint', db ? 'No overview yet. Press Edit report at the top to write one.' : 'No overview yet.')));
 
     const del = [];
-    ms.forEach((v, i) => { const d = v.closure?.delivered; if (!Array.isArray(d) || !d.length) return;
+    ms.forEach((v, i) => { const d = arr(v.closure?.delivered); if (!d.length) return;
       del.push(el('div', 'cl-sub', `Chapter ${i + 1} · SD ${v.stardate || '—'}`)); const ul = el('ul', 'cl-list'); d.forEach(x => ul.append(el('li', '', String(x)))); del.push(ul); });
-    rec.append(block('Delivered across chapters', 'cl', ...(del.length ? del : [el('p', 'hint', 'No closure reports yet.')])));
+    rec.append(block('Delivered across chapters', 'cl', ...(del.length ? del : [el('p', 'hint', lc ? 'Nothing listed as delivered.' : 'No closure reports yet.')])));
 
     const open = [];
-    if (lc?.closure?.openItems?.length) { open.push(el('div', 'cl-sub', `From chapter ${ms.indexOf(lc) + 1} · SD ${lc.stardate || '—'}`)); const ul = el('ul', 'cl-list'); lc.closure.openItems.forEach(x => ul.append(el('li', '', String(x)))); open.push(ul); }
+    if (arr(lc?.closure?.openItems).length) { open.push(el('div', 'cl-sub', `From chapter ${ms.indexOf(lc) + 1} · SD ${lc.stardate || '—'}`)); const ul = el('ul', 'cl-list'); arr(lc.closure.openItems).forEach(x => ul.append(el('li', '', String(x)))); open.push(ul); }
     else open.push(el('p', 'hint', 'Nothing open.'));
     if (lc?.closure?.nextStep && lc.closure.nextStep !== 'None') open.push(el('div', 'cl-sub', 'Next step'), el('p', '', lc.closure.nextStep));
     rec.append(block('Still open', 'wc', ...open));
@@ -914,14 +923,17 @@ function renderProject(g) {
     row.setAttribute('aria-label', `Open chapter ${i + 1}: ${v.summary || 'Mission'}`);
     row.append(el('div', 'sd', v.stardate || '—'), el('div', 'txt', `Chapter ${i + 1}: ${v.summary || 'Mission'}`));
     const pills = el('div'); pills.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
-    pills.append(el('span', 'pill', (v.turns || 0) + ' turns'));
+    pills.append(el('span', 'pill', count(v.turns || 0, 'turn')));
     if (v.handoffs) pills.append(el('span', 'pill ho', v.handoffs + ' handoff' + (v.handoffs > 1 ? 's' : '')));
     pills.append(el('span', 'pill closed', 'closed' + (v.closure?.outcome && v.closure.outcome !== 'complete' ? ' · ' + v.closure.outcome : '')));
     row.append(pills);
-    row.onclick = () => { misSel = v.id; renderRecord(); $('mis-rec').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
+    row.onclick = () => leaveReport(() => { misSel = v.id; renderRecord(); $('mis-rec').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); });
     list.append(row); });
   rec.append(block('Chapters', 'fl', list));
+  // A live update redraws the report: keep keyboard focus on Edit report if it was there
+  const refocus = document.activeElement?.matches('#mis-rec .rec-tools .btn.p');
   host.replaceChildren(rec);
+  if (refocus) host.querySelector('.rec-tools .btn.p')?.focus({ preventScroll: true });
 }
 
 // Edit report: the overview, what each chapter delivered, and what's still open, in one form.
@@ -931,26 +943,37 @@ function reportEditor(g, key, lc) {
   const field = (label, node, hint) => { const l = el('label', '', label); if (hint) l.append(el('small', '', hint)); l.append(node); return l; };
   // Each box grows to fit what's in it, so long lists don't scroll inside a small box
   const fit = t => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 2 + 'px'; };
-  const area = (val, cls) => { const t = el('textarea', cls); t.value = val || ''; t.addEventListener('input', () => fit(t)); return t; };
+  const boxes = [];
+  const area = (val, cls) => { const t = el('textarea', cls); t.value = val || ''; boxes.push([t, t.value]); t.addEventListener('input', () => fit(t)); return t; };
   const fOv = area(r?.overview, 'big');
   f.append(field('Overview', fOv));
-  const dels = ms.filter(v => v.closure).map(v => [v, area((v.closure.delivered || []).join('\n'))]);
+  const dels = ms.filter(v => v.closure).map(v => [v, area(arr(v.closure.delivered).join('\n'))]);
   dels.forEach(([v, t]) => f.append(field(`Delivered · Chapter ${ms.indexOf(v) + 1} · SD ${v.stardate || '—'}`, t, 'One per line')));
   let fOpen, fNext;
   if (lc) {
-    fOpen = area((lc.closure.openItems || []).join('\n'));
+    fOpen = area(arr(lc.closure.openItems).join('\n'));
     fNext = area(lc.closure.nextStep && lc.closure.nextStep !== 'None' ? lc.closure.nextStep : ''); fNext.maxLength = 300;
     const pair = el('div', 'pair'); pair.append(field('Still open', fOpen, `One per line · chapter ${ms.indexOf(lc) + 1}`), field('Next step', fNext));
     f.append(pair);
   } else f.append(el('p', 'hint', 'Delivered and Still open fill in once a chapter has a closure report.'));
   const save = el('button', 'btn p', 'Save'); save.type = 'submit';
   const state = el('span', 'toast'); state.setAttribute('role', 'status');
-  const done = () => { editingReport = null; renderRecord(); };
-  const acts = el('div', 'actions'); acts.append(save, btn('ghost', 'Cancel', done), state);
+  // Back on the report, keyboard focus returns to the Edit report button
+  const done = () => { closeReportForm(); renderRecord(); $('mis-rec').querySelector('.rec-tools .btn.p')?.focus(); };
+  const discard = btn('warn', 'Discard changes', null); discard.hidden = true;
+  const clearWarning = () => { discard.hidden = true; state.className = 'toast'; state.textContent = ''; };
+  reportGuard = go => {
+    if (!boxes.some(([t, was]) => t.value !== was)) { closeReportForm(); go(); return; }
+    state.className = 'toast err'; state.textContent = 'You have unsaved changes. Save them or discard them first.';
+    discard.hidden = false; discard.onclick = () => { closeReportForm(); go(); };
+    acts.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  };
+  const acts = el('div', 'actions'); acts.append(save, btn('ghost', 'Cancel', () => leaveReport(done)), discard, state);
   f.append(acts);
+  f.addEventListener('input', () => { if (!discard.hidden) clearWarning(); });
   f.onsubmit = async e => {
     e.preventDefault(); if (!db) return;
-    save.disabled = true; state.className = 'toast saving'; state.textContent = 'Saving…';
+    discard.hidden = true; save.disabled = true; state.className = 'toast saving'; state.textContent = 'Saving…';
     const now = Date.now(), writes = [db.collection('reports').doc(key).set({ project: g.project, overview: fOv.value.trim(), updatedAt: now })];
     // Only chapters whose lists changed are written, marked as edited by hand
     const same = (a, b) => JSON.stringify(a || []) === JSON.stringify(b || []);
@@ -964,7 +987,7 @@ function reportEditor(g, key, lc) {
     try { await Promise.all(writes); done(); }
     catch { save.disabled = false; state.className = 'toast err'; state.textContent = 'Not saved. Check your connection.'; }
   };
-  f.onkeydown = e => { if (e.key === 'Escape') done(); };
+  f.onkeydown = e => { if (e.key === 'Escape') leaveReport(done); };
   setTimeout(() => { f.querySelectorAll('textarea').forEach(fit); fOv.focus(); }, 0);
   return f;
 }
@@ -999,7 +1022,7 @@ function missionMd(v) {
   if (v.closed && c) {
     out.push('', '## Closure report', '', `**Outcome:** ${c.outcome || 'complete'}`);
     if (c.delivered?.length) out.push('', '### Delivered', '', ...c.delivered.map(x => `- ${x}`));
-    if (c.openItems?.length) out.push('', '### Open items', '', ...c.openItems.map(x => `- ${x}`));
+    if (arr(c.openItems).length) out.push('', '### Open items', '', ...arr(c.openItems).map(x => `- ${x}`));
     if (c.nextStep && c.nextStep !== 'None') out.push('', '### Next step', '', c.nextStep);
   }
   if (v.models?.length) out.push('', `**Models:** ${v.models.join(', ')}`);
@@ -1058,7 +1081,7 @@ function renderEditor(v) {
   let fOut, fDel, fOpen, fNext;
   if (v.closed) {
     fOut = el('select'); ['complete', 'partial', 'abandoned'].forEach(o => { const op = el('option', '', o); op.value = o; if ((c.outcome || 'complete') === o) op.selected = true; fOut.append(op); });
-    fDel = area((c.delivered || []).join('\n')); fOpen = area((c.openItems || []).join('\n')); fNext = inp(c.nextStep === 'None' ? '' : c.nextStep, 300);
+    fDel = area(arr(c.delivered).join('\n')); fOpen = area(arr(c.openItems).join('\n')); fNext = inp(c.nextStep === 'None' ? '' : c.nextStep, 300);
     const pair = el('div', 'pair'); pair.append(field('Delivered', fDel, 'One per line'), field('Open items', fOpen, 'One per line'));
     form.append(field('Outcome', fOut), pair, field('Next step', fNext));
   }
@@ -1137,7 +1160,7 @@ function renderRecord() {
     const oc = ['complete', 'partial', 'abandoned'].includes(c.outcome) ? c.outcome : 'complete';
     top.append(el('span', 'outcome ' + oc, oc), el('span', 'hint', 'Closed ' + when(v.closedAt || v.endedAt)));
     body.push(top);
-    const list = (title, items) => { if (!Array.isArray(items) || !items.length) return; body.push(el('div', 'cl-sub', title)); const ul = el('ul', 'cl-list'); items.forEach(x => ul.append(el('li', '', String(x)))); body.push(ul); };
+    const list = (title, items) => { if (!arr(items).length) return; body.push(el('div', 'cl-sub', title)); const ul = el('ul', 'cl-list'); arr(items).forEach(x => ul.append(el('li', '', String(x)))); body.push(ul); };
     list('Delivered', c.delivered);
     list('Open items', c.openItems);
     if (c.nextStep && c.nextStep !== 'None') { body.push(el('div', 'cl-sub', 'Next step')); body.push(el('p', '', c.nextStep)); }
