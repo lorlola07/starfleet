@@ -25,7 +25,7 @@ const band = (surface: 'terminal' | 'desktop', isWorking: boolean) =>
     props: { hasSurvey: false, isWorking, maxRows: 6, bodyColumns: 80, scroll: { offset: 0, bodyRows: 6 }, view: {} },
   }) as const
 
-// A project's deck, as the console's crew decks picture names it in its alt text ("Riker (MOD) on
+// A project's deck, as the console's crew decks picture names it in its alt text ("Riker (workshop) on
 // engineering")
 async function deckOn($: { ui: { mount: (e: never) => Promise<any> } }, project: string): Promise<string | undefined> {
   const view = await $.ui.mount(pane('starfleet-console', 'desktop') as never)
@@ -55,11 +55,11 @@ function engine(on: any, run?: (_: unknown, e: { argv: string[] }) => unknown, l
   on('store.delete', (_: unknown, e: { key: string }) => { delete store[e.key]; return { value: undefined } })
   on('store.keys', () => ({ value: Object.keys(store) }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 150000, window: 200000, percent: 75 }, rateLimits: [] } }))
-  on('session.cwd', () => ({ value: fs?.cwd ?? '/Users/cap/MOD' }))
+  on('session.cwd', () => ({ value: fs?.cwd ?? '/Users/cap/workshop' }))
   on('session.id', () => ({ value: sessionId }))
   on('env.get', () => ({ value: '/Users/cap' }))
   if (live) on('fs.read', (_: unknown, e: { path: string }) => (e.path.endsWith(live.name) ? { value: live.text } : { value: '' }))
-  on('fs.list', fs?.list ?? ((_: unknown, e: { path: string }) => e.path.endsWith('starfleet-live') ? { value: live ? [{ name: live.name, kind: 'file', size: 1, mtimeMs: Date.now(), isLink: false }] : [] } : ({ value: [{ name: '-Users-cap-MOD', kind: 'dir', size: 0, mtimeMs: Date.now(), isLink: false }, { name: '-Users-cap-old-app', kind: 'dir', size: 0, mtimeMs: Date.now() - 9 * 86400000, isLink: false }] })))
+  on('fs.list', fs?.list ?? ((_: unknown, e: { path: string }) => e.path.endsWith('starfleet-live') ? { value: live ? [{ name: live.name, kind: 'file', size: 1, mtimeMs: Date.now(), isLink: false }] : [] } : ({ value: [{ name: '-Users-cap-workshop', kind: 'dir', size: 0, mtimeMs: Date.now(), isLink: false }, { name: '-Users-cap-old-app', kind: 'dir', size: 0, mtimeMs: Date.now() - 9 * 86400000, isLink: false }] })))
   on('fs.exists', fs?.exists ?? (() => ({ value: true })))
   on('fs.stat', (_: unknown, e: { path: string }) => ({ value: { kind: 'dir', size: 0, mtimeMs: e.path.endsWith('old-app') ? Date.now() - 9 * 86400000 : Date.now(), isLink: false } }))
   on('process.run', run ?? (() => ({ value: { exitCode: 0, stdout: ' M hooks/core.tsx\n', stderr: '' } })))
@@ -79,7 +79,7 @@ function engine(on: any, run?: (_: unknown, e: { argv: string[] }) => unknown, l
 
 test('warp core, log, crew and band draw on desktop and terminal', async ($, on) => {
   const store = engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   // The console opens unasked at session start
   expect(opened).toContain('starfleet-console')
   const run = $.command.run as (input: { command: string; args: string }) => Promise<unknown>
@@ -120,7 +120,7 @@ test('the console draws its LCARS layout on desktop and terminal', async ($, on)
   on('fs.read', () => ({ value: '# Handoff\nNext: wire the hub sync' }))
   on('model.complete', () => ({ value: { isAnswered: true, text: 'LEFT OFF: console built\nSTANDING ORDER: reload plugins\nWATCH FOR: Nothing flagged', usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }))
   on('audio.play', () => ({ value: undefined }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const run = $.command.run as (input: { command: string; args: string }) => Promise<unknown>
   await run({ command: 'log', args: 'beam up the tests' })
   await run({ command: 'starfleet', args: '' })
@@ -165,7 +165,7 @@ test('the log saves notes as typed, and the course follows files changed and bui
   on('tool.call', () => ({ result: 'ok' }))
   on('prompt.submit', (_: unknown, e: { text: string }) => ({ text: e.text }))
   on('model.complete', () => ({ value: { isAnswered: true, text: 'Fix the warp core crash on startup.', usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
   expect(await ui.find({ type: 'Text', text: /LAST ORDER/ })).toBeFalsy()
   await $.prompt.submit({ text: 'scan the nebula for tribbles' } as never)
@@ -200,7 +200,7 @@ test('the log saves notes as typed, and the course follows files changed and bui
   expect(order.indexOf('LAST ORDER')).toBeLessThan(order.indexOf('MISSION BRIEFING'))
   expect(order).not.toContain('📓 CAPTAIN')
   expect(order).not.toContain('💬 LAST ORDER')
-  await callTool($, { tool: 'Edit', file_path: '/Users/cap/MOD/a.ts', old_string: 'a', new_string: 'b' })
+  await callTool($, { tool: 'Edit', file_path: '/Users/cap/workshop/a.ts', old_string: 'a', new_string: 'b' })
   await callTool($, { tool: 'Bash', command: 'npm test' })
   expect(await ui.find({ type: 'Text', text: /MISSION ADVANCING/ })).toBeTruthy()
   const detail = await ui.find({ type: 'Text', text: /1 file changed/ })
@@ -216,7 +216,7 @@ test('close mission sends a closure report that marks the mission closed for arc
   on('audio.play', () => ({ value: undefined }))
   const sent: string[] = []
   on('prompt.submit', (_: unknown, e: { text: string }) => { sent.push(e.text); return { text: e.text } })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
   await ui.press({ key: 'closure' })
   await new Promise(done => setTimeout(done, 20))
@@ -268,7 +268,7 @@ test('a project that leaves the decks keeps its sprite until a newcomer needs it
   // Projects that left the decks hold every sprite
   const sprites = SPRITE_ORDER
   store.crewAssign = Object.fromEntries(sprites.map((s, i) => [`/Users/cap/archived-${i}`, s]))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const run = $.command.run as (input: { command: string; args: string }) => Promise<unknown>
   await run({ command: 'crew', args: '' })
   const crew = store.crew as { path: string; sprite: string }[]
@@ -283,65 +283,65 @@ test('a project that leaves the decks keeps its sprite until a newcomer needs it
 test('a project that left keeps its sprite while free ones remain', async ($, on) => {
   const store = engine(on)
   store.crewAssign = { '/Users/cap/archived-0': 'worf' }
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   expect((store.crew as { sprite: string }[]).map(c => c.sprite)).not.toContain('worf')
   expect((store.crewAssign as Record<string, string>)['/Users/cap/archived-0']).toBe('worf')
 })
 
 test('project folders with spaces or underscores join the crew', async ($, on) => {
-  // ~/.claude/projects turns "Side Work" and "field_notes" into dashes; only the real names exist
-  const real = new Set(['/Users', '/Users/cap', '/Users/cap/MOD', '/Users/cap/Side Work', '/Users/cap/field_notes'])
+  // ~/.claude/projects turns "Side Project" and "field_notes" into dashes; only the real names exist
+  const real = new Set(['/Users', '/Users/cap', '/Users/cap/workshop', '/Users/cap/Side Project', '/Users/cap/field_notes'])
   const dir = (name: string) => ({ name, kind: 'dir', size: 0, mtimeMs: Date.now(), isLink: false })
   const store = engine(on, undefined, undefined, {
     exists: (_, e) => ({ value: real.has(e.path) }),
     list: (_, e) => ({
-      value: e.path.endsWith('/.claude/projects') ? [dir('-Users-cap-MOD'), dir('-Users-cap-Side-Work'), dir('-Users-cap-field-notes')]
-        : e.path === '/Users/cap' ? [dir('MOD'), dir('Side Work'), dir('field_notes')]
+      value: e.path.endsWith('/.claude/projects') ? [dir('-Users-cap-workshop'), dir('-Users-cap-Side-Project'), dir('-Users-cap-field-notes')]
+        : e.path === '/Users/cap' ? [dir('workshop'), dir('Side Project'), dir('field_notes')]
         : [],
     }),
   })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   const paths = (store.crew as { path: string }[]).map(c => c.path)
-  expect(paths).toContain('/Users/cap/Side Work')
+  expect(paths).toContain('/Users/cap/Side Project')
   expect(paths).toContain('/Users/cap/field_notes')
 })
 
 test('projects archived in the app leave the decks', async ($, on) => {
   const store = engine(on)
-  // old-app has only archived sessions; MOD has a live one
+  // old-app has only archived sessions; workshop has a live one
   const sessions = [
     { cwd: '/Users/cap/old/app', isArchived: true },
-    { cwd: '/Users/cap/MOD', isArchived: true },
-    { cwd: '/Users/cap/MOD', isArchived: false },
+    { cwd: '/Users/cap/workshop', isArchived: true },
+    { cwd: '/Users/cap/workshop', isArchived: false },
   ]
   on('mcp.call', () => ({ value: { content: [{ type: 'text', text: JSON.stringify(sessions) }], isError: false } }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const run = $.command.run as (input: { command: string; args: string }) => Promise<unknown>
   await run({ command: 'crew', args: '' })
   const crew = store.crew as { path: string }[]
-  expect(crew.map(c => c.path)).toEqual(['/Users/cap/MOD'])
+  expect(crew.map(c => c.path)).toEqual(['/Users/cap/workshop'])
 })
 
 test('each chat in a crew project gets that crew member\'s emoji in front of its name', async ($, on) => {
   const store = engine(on)
   const titles: Record<string, string> = {}
   const sessions = [
-    { sessionId: 'a', title: '🟧 Old tag from before', cwd: '/Users/cap/MOD', isArchived: false },
-    { sessionId: 'b', title: 'Archived chat', cwd: '/Users/cap/MOD', isArchived: true },
+    { sessionId: 'a', title: '🟧 Old tag from before', cwd: '/Users/cap/workshop', isArchived: false },
+    { sessionId: 'b', title: 'Archived chat', cwd: '/Users/cap/workshop', isArchived: true },
     { sessionId: 'c', title: 'Not a crew project', cwd: '/Users/cap/elsewhere', isArchived: false },
     // Its project left the decks and its sprite went to someone else: the old emoji comes off
     { sessionId: 'd', title: '🟨 Departed project', cwd: '/Users/cap/gone', isArchived: false },
   ]
   on('mcp.call', (_: unknown, e: { tool: string; args: { session_id?: string; title?: string } }) => {
     if (e.tool === 'set_session_title') titles[e.args.session_id!] = e.args.title!
-    const body = e.tool === 'get_session' ? { sessionId: 'local_self', title: 'This chat', cwd: '/Users/cap/MOD/.claude/worktrees/x' } : sessions
+    const body = e.tool === 'get_session' ? { sessionId: 'local_self', title: 'This chat', cwd: '/Users/cap/workshop/.claude/worktrees/x' } : sessions
     return { value: { content: [{ type: 'text', text: JSON.stringify(body) }], isError: false } }
   })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
-  const sprite = (store.crewAssign as Record<string, string>)['/Users/cap/MOD']
+  const sprite = (store.crewAssign as Record<string, string>)['/Users/cap/workshop']
   expect(sprite).toBe('picard')
   expect(titles).toEqual({ a: '🟥 Old tag from before', d: 'Departed project', self: '🟥 This chat' })
   // The crew decks list the same emoji
@@ -353,7 +353,7 @@ test('the shields deny a destructive Bash call with the reason, and let safe one
   engine(on)
   on('tool.call', () => ({ result: 'ok' }))
   on('audio.play', () => ({ value: undefined }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const tools = $.tool as unknown as { call: (input: object) => Promise<{ deny?: string }> }
   const blocked = ['rm -rf build', 'rm -fr build', 'rm -r -f build', 'rm --recursive --force x', 'cd a && rm -Rf b', 'git push -f origin main', 'git push --force-with-lease', 'git reset --hard']
   for (const command of blocked) expect((await tools.call({ tool: 'Bash', command }))?.deny).toBeTruthy()
@@ -369,14 +369,14 @@ test('a worktree session keeps its project aboard', async ($, on) => {
     { cwd: '/Users/cap/old/app/.claude/worktrees/feature-x', isArchived: false },
   ]
   on('mcp.call', () => ({ value: { content: [{ type: 'text', text: JSON.stringify(sessions) }], isError: false } }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   expect((store.crew as { path: string }[]).map(c => c.path)).toContain('/Users/cap/old/app')
 })
 
 test('log writes after /clear are tracked for cleanup', async ($, on) => {
   const store = engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const run = $.command.run as (input: { command: string; args: string }) => Promise<unknown>
   await run({ command: 'log', args: 'before clear' })
   // /clear: the process goes on under a new id, with no session.start
@@ -391,7 +391,7 @@ test('a stood-down memory alert stays down until context climbs past 90% again',
   engine(on)
   on('audio.play', () => ({ value: undefined }))
   on('session.measure', () => ({ changed: [] }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const measure = $.session.measure as unknown as (input: object) => Promise<unknown>
   const context = (percent: number) => ({ context: { tokens: percent * 2000, window: 200000, percent } })
   await measure(context(92))
@@ -405,7 +405,7 @@ test('a stood-down memory alert stays down until context climbs past 90% again',
 test('focus mode shows only the comms badge, and hailing opens the console', async ($, on) => {
   const store = engine(on)
   on('audio.play', () => ({ value: undefined }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const run = $.command.run as (input: { command: string; args: string }) => Promise<unknown>
 
   for (const surface of ['desktop', 'terminal'] as const) {
@@ -449,19 +449,19 @@ test('every sprite holds its deck while Claude works, so the crew picture never 
   let finishTool = () => {}
   on('tool.call', () => new Promise(done => { finishTool = () => done({ result: {} }) }))
   on('turn.start', ((_: unknown, e: unknown) => e) as never)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
-  const deckOfMod = () => deckOn($, 'MOD')
-  // The scan put MOD (uncommitted changes) in engineering
-  expect(await deckOfMod()).toBe('engineering')
+  const deckOfWorkshop = () => deckOn($, 'workshop')
+  // The scan put workshop (uncommitted changes) in engineering
+  expect(await deckOfWorkshop()).toBe('engineering')
   await ($.turn as unknown as { start: (input: object) => Promise<unknown> }).start({ text: 'scan', turnId: 't1' })
   const running = ($.tool as unknown as { call: (input: object) => Promise<unknown> }).call({ tool: 'Grep', pattern: 'warp' })
   await new Promise(r => (globalThis as unknown as { setTimeout: (f: unknown, ms: number) => void }).setTimeout(r, 0))
   // A Grep would be science, but mid-turn the sprite stays where the turn found it
-  expect(await deckOfMod()).toBe('engineering')
+  expect(await deckOfWorkshop()).toBe('engineering')
   finishTool()
   await running
-  expect(await deckOfMod()).toBe('engineering')
+  expect(await deckOfWorkshop()).toBe('engineering')
 })
 
 test('the mission record keeps models, plugins, skills, files and the warp core', async ($, on) => {
@@ -469,11 +469,11 @@ test('the mission record keeps models, plugins, skills, files and the warp core'
   on('tool.call', () => ({ result: 'ok' }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('turn.complete', () => ({ text: '' }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await callTool($, { tool: 'Skill', skill: 'superpowers:brainstorming' })
   await callTool($, { tool: 'Agent', description: 'x', prompt: 'x', subagent_type: 'starfleet:away-team' })
   await callTool($, { tool: 'mcp__plugin_canva_canva__create-design' })
-  await callTool($, { tool: 'Write', file_path: '/Users/cap/MOD/b.ts', content: 'b' })
+  await callTool($, { tool: 'Write', file_path: '/Users/cap/workshop/b.ts', content: 'b' })
   await ($.turn.complete as (e: unknown) => Promise<unknown>)({ durationMs: 5000, answer: 'Done.', isAborted: false })
   const records = JSON.parse(String((await callTool($, { tool: 'mcp__starfleet__starfleet_records' }) as { result: unknown }).result))
   const m = records.missions.find((x: { id: string }) => x.id === sessionId)
@@ -483,7 +483,7 @@ test('the mission record keeps models, plugins, skills, files and the warp core'
   expect(m.skills).toEqual(['superpowers:brainstorming'])
   expect(m.agents).toEqual(['starfleet:away-team'])
   expect(m.plugins).toEqual(expect.arrayContaining(['starfleet', 'canva', 'superpowers']))
-  expect(m.files).toContain('/Users/cap/MOD/b.ts')
+  expect(m.files).toContain('/Users/cap/workshop/b.ts')
   expect(m.warpCore.orders).toBe(4)
   expect(m.tools.Write).toBe(1)
 })
@@ -496,7 +496,7 @@ test('a picked cloud repo comes aboard from GitHub, and unpicking sends it ashor
     if (args.startsWith('repo view')) return { value: { exitCode: 0, stdout: JSON.stringify({ pushedAt: pushed }), stderr: '' } }
     return { value: { exitCode: 0, stdout: '', stderr: '' } }
   })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   await new Promise(done => setTimeout(done, 10))
   const ui = await $.ui.mount(pane('starfleet-crew', 'desktop'))
@@ -519,7 +519,7 @@ test('the cloud crew tool sends a repo ashore', async ($, on) => {
   const store = engine(on, () => ({ value: { exitCode: 0, stdout: JSON.stringify({ pushedAt: new Date().toISOString() }), stderr: '' } }))
   on('tool.call', () => ({ result: 'ok' }))
   store.cloudCrew = ['cap/Voyager']
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const ran = await callTool($, { tool: 'mcp__starfleet__starfleet_cloud_crew', repo: 'cap/voyager', aboard: false }) as { result: string }
   expect(ran.result).toContain('now ashore')
   expect(store.cloudCrew).toEqual([])
@@ -529,18 +529,18 @@ test('the cloud crew tool sends a repo ashore', async ($, on) => {
 test('the crew tool marks a folder as not a project, and brings it back', async ($, on) => {
   const store = engine(on)
   on('tool.call', () => ({ result: 'ok' }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
-  const hid = await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: 'mod', aboard: false }) as { result: string }
+  const hid = await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: 'WORKSHOP', aboard: false }) as { result: string }
   expect(hid.result).toContain('left the crew')
-  expect(store.crewHidden).toEqual(['/Users/cap/MOD'])
-  expect((store.crew as { path: string }[]).map(c => c.path)).not.toContain('/Users/cap/MOD')
+  expect(store.crewHidden).toEqual(['/Users/cap/workshop'])
+  expect((store.crew as { path: string }[]).map(c => c.path)).not.toContain('/Users/cap/workshop')
   // Its character is freed for someone else
-  expect(Object.keys(store.crewAssign as object)).not.toContain('/Users/cap/MOD')
-  const back = await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: 'MOD', aboard: true }) as { result: string }
+  expect(Object.keys(store.crewAssign as object)).not.toContain('/Users/cap/workshop')
+  const back = await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: 'workshop', aboard: true }) as { result: string }
   expect(back.result).toContain('aboard')
   expect(store.crewHidden).toEqual([])
-  expect((store.crew as { path: string }[]).map(c => c.path)).toContain('/Users/cap/MOD')
+  expect((store.crew as { path: string }[]).map(c => c.path)).toContain('/Users/cap/workshop')
 })
 
 test('Manage crew removes and adds a project after asking inline, by its name', async ($, on) => {
@@ -550,7 +550,7 @@ test('Manage crew removes and adds a project after asking inline, by its name', 
     if (e.tool === 'AskUserQuestion') asked.push('asked')
     return { result: 'ok' }
   })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   const ui = await $.ui.mount(pane('starfleet-crew', 'desktop'))
   await ui.press({ key: 'manage-add' })
@@ -569,7 +569,7 @@ test('Manage crew removes and adds a project after asking inline, by its name', 
   // Add: the removed folder is offered back under Not aboard, and ← brings it on at once
   await ui.press({ key: 'manage-add' })
   expect((await ui.find({ type: 'Button', key: 'crew-pick-/Users/cap/old/app' }))?.text).toBe('←')
-  expect((await ui.find({ type: 'Button', key: `crew-drop-/Users/cap/MOD` }))?.text).toBe('→')
+  expect((await ui.find({ type: 'Button', key: `crew-drop-/Users/cap/workshop` }))?.text).toBe('→')
   await ui.press({ key: 'crew-pick-/Users/cap/old/app' })
   expect(store.crewHidden).toEqual([])
   // Undoing a removal of a recent project doesn't pin it aboard for good
@@ -588,7 +588,7 @@ test('Manage crew removes and adds a project after asking inline, by its name', 
 
 test('Not aboard folders can be pruned off the list, and adding one by path brings it back', async ($, on) => {
   const store = engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   const ui = await $.ui.mount(pane('starfleet-crew', 'desktop'))
   await ui.press({ key: 'manage-add' })
@@ -637,7 +637,7 @@ test('a /log note starting with a category word and a colon is filed under it', 
 test('log entries carry a category: picked in the log tab, filtered there, and sent to the hub', async ($, on) => {
   const toasts: string[] = []
   const store = engine(on, undefined, undefined, { toasts })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const run = $.command.run as (input: { command: string; args: string }) => Promise<unknown>
   // /log with a category word files it there, and the hub doc carries it
   await run({ command: 'log', args: 'idea: cache the crew scan' })
@@ -685,15 +685,15 @@ test('log entries carry a category: picked in the log tab, filtered there, and s
 
 test('an entry saved before categories reads, and syncs, as a note', async ($, on) => {
   const store = engine(on)
-  store['log:sess-1'] = [{ id: 'log-old', stardate: '1027.26', text: 'old note', at: Date.now(), project: 'MOD' }]
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  store['log:sess-1'] = [{ id: 'log-old', stardate: '1027.26', text: 'old note', at: Date.now(), project: 'workshop' }]
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const ran = await callTool($, { tool: 'mcp__starfleet__starfleet_records' }) as { result: string }
   expect(ran.result).toContain('"category": "note"')
 })
 
 test('Band off hides the strip above the prompt, from the console button or /band, and is remembered', async ($, on) => {
   const store = engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   // On: the ship glides while Claude works
   let strip = await $.ui.mount(band('desktop', true))
   expect(await strip.find({ type: 'Svg' })).toBeTruthy()
@@ -722,20 +722,20 @@ test('Band off hides the strip above the prompt, from the console button or /ban
 test('a chat opened in the home folder puts the home folder on the crew like any project', async ($, on) => {
   const entry = (name: string, age: number) => ({ name, kind: 'dir' as const, size: 0, mtimeMs: Date.now() - age, isLink: false })
   const store = engine(on, undefined, undefined, {
-    list: (_: unknown, e: { path: string }) => e.path.endsWith('starfleet-live') ? { value: [] } : { value: [entry('-Users-cap', 0), entry('-Users-cap-MOD', 1000)] },
+    list: (_: unknown, e: { path: string }) => e.path.endsWith('starfleet-live') ? { value: [] } : { value: [entry('-Users-cap', 0), entry('-Users-cap-workshop', 1000)] },
   })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   const crew = (store.crew as { path: string; project: string }[]).map(c => c.path)
   expect(crew).toContain('/Users/cap')
-  expect(crew).toContain('/Users/cap/MOD')
+  expect(crew).toContain('/Users/cap/workshop')
 })
 
 test('a log entry saved in the old stardate format reads in the new one', async ($, on) => {
   const store = engine(on)
   const at = new Date(2026, 9, 27, 10, 54).getTime()
-  store['log:sess-1'] = [{ id: 'log-old', stardate: '2026.1027.1054', text: 'old note', at, project: 'MOD' }]
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  store['log:sess-1'] = [{ id: 'log-old', stardate: '2026.1027.1054', text: 'old note', at, project: 'workshop' }]
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const ran = await callTool($, { tool: 'mcp__starfleet__starfleet_records' }) as { result: string }
   expect(ran.result).toContain('"stardate": "1027.26"')
   expect(ran.result).not.toContain('2026.1027.1054')
@@ -743,7 +743,7 @@ test('a log entry saved in the old stardate format reads in the new one', async 
 
 test('About opens a pane that names every part and what it connects to', async ($, on) => {
   engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   for (const surface of ['desktop', 'terminal'] as const) {
     const ui = await $.ui.mount(pane('starfleet-console', surface))
     opened.length = 0
@@ -764,7 +764,7 @@ test('added folders never push the crew past 11 aboard, and adding a 12th is ref
   const store = engine(on)
   on('tool.call', () => ({ result: 'ok' }))
   store.crewAdded = Array.from({ length: full + 1 }, (_, i) => `/Users/cap/added-${i}`)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   const crew = store.crew as { sprite: string }[]
   expect(crew.length).toBeLessThanOrEqual(full)
@@ -786,7 +786,7 @@ test('Claude adds a folder the mod has never seen only after the captain says so
     asked.push(question)
     return { result: { questions: e.questions, answers: { [question]: answer } } }
   })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   // Keep it off (the default) adds nothing
   const kept = await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: '/Users/cap/cloned/stranger', aboard: true }) as { result: string }
   expect(asked[0]).toContain('/Users/cap/cloned/stranger')
@@ -797,8 +797,8 @@ test('Claude adds a folder the mod has never seen only after the captain says so
   await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: '/Users/cap/cloned/stranger', aboard: true })
   expect(store.crewAdded as string[]).toContain('/Users/cap/cloned/stranger')
   // A folder the mod already knows comes back with no question
-  await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: 'MOD', aboard: false })
-  await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: 'MOD', aboard: true })
+  await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: 'workshop', aboard: false })
+  await callTool($, { tool: 'mcp__starfleet__starfleet_crew', project: 'workshop', aboard: true })
   expect(asked.length).toBe(2)
   // Taking an unknown folder off first can't sneak it past the question
   answer = 'Keep it off'
@@ -824,7 +824,7 @@ test('with no hub yet, Set up my hub has Claude publish one once, and the button
   const sent: string[] = []
   on('prompt.submit', (_: unknown, e: { text: string }) => { sent.push(e.text); return { text: e.text } })
   on('tool.call', () => ({ result: 'ok' }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
   await ui.press({ key: 'setup-hub' })
   expect(sent.length).toBe(1)
@@ -858,9 +858,9 @@ test('the crew scan skips temp and scratch project dirs without decoding them', 
   const dir = (name: string) => ({ name, kind: 'dir', size: 0, mtimeMs: Date.now(), isLink: false })
   engine(on, undefined, undefined, {
     exists: (_, e) => { looked.push(e.path); return { value: true } },
-    list: (_, e) => ({ value: e.path.endsWith('/.claude/projects') ? [dir('-Users-cap-MOD'), ...Array.from({ length: 20 }, (_, i) => dir(`-private-tmp-claude-501-scratch-${i}`))] : [] }),
+    list: (_, e) => ({ value: e.path.endsWith('/.claude/projects') ? [dir('-Users-cap-workshop'), ...Array.from({ length: 20 }, (_, i) => dir(`-private-tmp-claude-501-scratch-${i}`))] : [] }),
   })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   expect(looked.filter(p => p.startsWith('/private')).length).toBe(0)
 })
@@ -870,8 +870,8 @@ test('deleting a log entry also takes it off the hub', async ($, on) => {
   const sent: string[] = []
   on('prompt.submit', (_: unknown, e: { text: string }) => { sent.push(e.text); return { text: e.text } })
   store.hubUrl = 'https://claude.ai/artifact/hub1'
-  store['log:sess-1'] = [{ id: 'log-1', stardate: '1027.26', text: 'typo', at: Date.now(), project: 'MOD' }]
-  store['log:sess-1'] = [...store['log:sess-1'] as unknown[], { id: 'log-2', stardate: '1027.26', text: 'also a typo', at: Date.now(), project: 'MOD' }]
+  store['log:sess-1'] = [{ id: 'log-1', stardate: '1027.26', text: 'typo', at: Date.now(), project: 'workshop' }]
+  store['log:sess-1'] = [...store['log:sess-1'] as unknown[], { id: 'log-2', stardate: '1027.26', text: 'also a typo', at: Date.now(), project: 'workshop' }]
   let answer = 'Keep'
   let hubWorks = true
   const asked: string[] = []
@@ -887,7 +887,7 @@ test('deleting a log entry also takes it off the hub', async ($, on) => {
     asked.push(question)
     return { result: { questions: e.questions, answers: { [question]: answer } } }
   })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const ui = await $.ui.mount(pane('starfleet-log', 'desktop'))
   // Delete asks inline, naming the entry, never in the app's question box; Keep changes nothing;
   // Delete entry removes it here and, with no chat turn, on the hub
@@ -920,7 +920,7 @@ test('a recorded note goes straight to the hub, with no chat turn', async ($, on
     if (e.tool === 'ArtifactData') hub.push(e)
     return { result: 'ok', text: 'committed' }
   })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'log', args: 'a thought' })
   expect(sent).toEqual([])
   expect(JSON.stringify(hub)).toContain('"op":"set","collection":"log","doc_id":"log-')
@@ -930,7 +930,7 @@ test('a recorded note goes straight to the hub, with no chat turn', async ($, on
 test('notes recorded before there is a hub are sent once the hub is set', async ($, on) => {
   const store = engine(on)
   on('prompt.submit', (_: unknown, e: { text: string }) => ({ text: e.text }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'log', args: 'before the hub' })
   expect((store.hubPending as unknown[]).length).toBe(1)
   const ran = await callTool($, { tool: 'mcp__starfleet__starfleet_set_hub', url: 'https://claude.ai/artifact/hub2' }) as { result: string }
@@ -939,18 +939,18 @@ test('notes recorded before there is a hub are sent once the hub is set', async 
 })
 
 test('a failing test run in a worktree chat puts its project in sickbay', async ($, on) => {
-  const store = engine(on, undefined, undefined, { cwd: '/Users/cap/MOD/.claude/worktrees/x' })
+  const store = engine(on, undefined, undefined, { cwd: '/Users/cap/workshop/.claude/worktrees/x' })
   on('tool.call', () => ({ result: { stdout: '', stderr: 'FAIL', interrupted: false }, isError: true }))
   on('audio.play', () => ({ value: undefined }))
-  await $.session.start({ cwd: '/Users/cap/MOD/.claude/worktrees/x', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop/.claude/worktrees/x', surface: 'desktop', isInteractive: true })
   await callTool($, { tool: 'Bash', command: 'npm test' })
-  expect((store.health as Record<string, boolean>)['/Users/cap/MOD']).toBe(true)
+  expect((store.health as Record<string, boolean>)['/Users/cap/workshop']).toBe(true)
 })
 
 test('a second crew scan reuses decoded project folders', async ($, on) => {
   let looked = 0
   engine(on, undefined, undefined, { exists: () => { looked += 1; return { value: true } } })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const run = $.command.run as (input: { command: string; args: string }) => Promise<unknown>
   await run({ command: 'crew', args: '' })
   looked = 0
@@ -961,7 +961,7 @@ test('a second crew scan reuses decoded project folders', async ($, on) => {
 
 test('the console never grows a crew list: Manage crew opens its own tab', async ($, on) => {
   engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   const console_ = await $.ui.mount(pane('starfleet-console', 'desktop'))
   if (!(await console_.find({ type: 'Button', key: 'manage-crew' }))) await console_.press({ key: 'sec-crew' })
@@ -975,7 +975,7 @@ test('the console never grows a crew list: Manage crew opens its own tab', async
 
 test('the Crew page lists every project, changes characters only on Save, and benches the rest', async ($, on) => {
   const store = engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   const crew = () => store.crew as { path: string; sprite: string; project: string }[]
   const [first, second] = crew()
@@ -1009,16 +1009,16 @@ test('the Crew page lists every project, changes characters only on Save, and be
 
 test('a project that had Quark is moved to the Gorn', async ($, on) => {
   const store = engine(on)
-  store.crewAssign = { '/Users/cap/MOD': 'quark' }
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  store.crewAssign = { '/Users/cap/workshop': 'quark' }
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
-  expect((store.crew as { path: string; sprite: string }[]).find(c => c.path === '/Users/cap/MOD')?.sprite).toBe('gorn')
+  expect((store.crew as { path: string; sprite: string }[]).find(c => c.path === '/Users/cap/workshop')?.sprite).toBe('gorn')
 })
 
 test('/hub clear says how the next hub gets made', async ($, on) => {
   const store = engine(on)
   store.hubUrl = 'https://claude.ai/artifact/hub1'
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const ran = await ($.command.run as (input: { command: string; args: string }) => Promise<{ text?: string }>)({ command: 'hub', args: 'clear' })
   expect(ran.text).toContain('Close mission')
   expect(ran.text).not.toMatch(/next sync/)
@@ -1026,7 +1026,7 @@ test('/hub clear says how the next hub gets made', async ($, on) => {
 
 test('console drawings fit a narrow pane, and a full deck of crew is never cut off', async ($, on) => {
   engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   const narrow = { ...pane('starfleet-console', 'desktop'), props: { ...pane('starfleet-console', 'desktop').props, bodyColumns: 24 } }
   const ui = await $.ui.mount(narrow)
@@ -1087,7 +1087,7 @@ test('an acknowledged briefing stays gone after a reload or reopening the consol
   on('fs.read', () => ({ value: '# Handoff\nNext: wire the hub sync' }))
   on('model.complete', () => ({ value: { isAnswered: true, text: 'LEFT OFF: a\nSTANDING ORDER: b\nWATCH FOR: c', usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }))
   on('audio.play', () => ({ value: undefined }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
   await ui.press({ key: 'brief' })
   await ui.press({ key: 'ack' })
@@ -1101,7 +1101,7 @@ test('an acknowledged briefing stays gone after a reload or reopening the consol
 
 test('every pane sits on the dark LCARS background with its own text colors, so light mode looks the same', async ($, on) => {
   engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   for (const id of ['starfleet-console', 'starfleet-crew', 'starfleet-log', 'starfleet-about', 'starfleet-core']) {
     const ui = await $.ui.mount(pane(id, 'desktop'))
@@ -1139,7 +1139,7 @@ test('every pane sits on the dark LCARS background with its own text colors, so 
 
 test('every heading uses the one heading color, and the viewscreen keeps a roomy wide canvas', async ($, on) => {
   engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   for (const id of ['starfleet-crew', 'starfleet-log', 'starfleet-about', 'starfleet-core']) {
     const ui = await $.ui.mount(pane(id, 'desktop'))
@@ -1180,7 +1180,7 @@ test('review: a held console keeps every picture the same between redraws with t
   // takes the keys and the orbit paused there. Swapping to a different picture on focus flickered
   // (repro panes, 2026-10-30)
   engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const p = pane('starfleet-console', 'desktop')
   const sources = async (isFocused: boolean) => {
     const ui = await $.ui.mount({ ...p, props: { ...p.props, isFocused } })
@@ -1219,7 +1219,7 @@ test('review: a held console keeps every picture the same between redraws with t
 test('the service record only counts up: a stale or unloaded copy never writes lower numbers', async ($, on) => {
   const store = engine(on)
   store.record = { sessions: 3, turns: 5, blocked: 0, scans: 0 }
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   // Another chat has counted far past this one's copy in the meantime
   store.record = { sessions: 18, turns: 191, blocked: 2, scans: 0 }
   await callTool($, { tool: 'mcp__starfleet__sensor_scan', target: 'the nebula' })
@@ -1239,7 +1239,7 @@ test('review: what a chat remembers comes back after a reload', async ($, on) =>
   store['briefing:sess-1'] = true
   store.record = { sessions: 18, turns: 191, blocked: 0, scans: 0 }
   store.consoleOpen = { crew: false, core: true, record: true }
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
   // Context is still at 75%: the tier was already announced, so no repeat toast
   expect(toasts.some(t => /Assimilation|Borg/.test(t))).toBe(false)
@@ -1260,7 +1260,7 @@ test('review: every button in every pane presses without an error, on desktop an
   on('audio.play', () => ({ value: undefined }))
   on('session.compact', () => ({ skip: 'not in a test' }))
   on('model.complete', () => ({ value: { isAnswered: true, text: 'LEFT OFF: a\nSTANDING ORDER: b\nWATCH FOR: c', usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   const pressed: string[] = []
   for (const surface of ['desktop', 'terminal'] as const) {
@@ -1283,7 +1283,7 @@ test('review: every button in every pane presses without an error, on desktop an
 
 test('review: every pane draws at narrow, medium and wide widths without fixed-size pictures', async ($, on) => {
   engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   for (const surface of ['desktop', 'terminal'] as const) {
     for (const id of ALL_PANES) {
@@ -1305,7 +1305,7 @@ test('review: lines that change while Claude works are one line each, and nothin
   engine(on)
   on('prompt.submit', (_: unknown, e: { text: string }) => ({ text: e.text }))
   on('model.complete', () => new Promise(() => {}))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const narrow = { ...pane('starfleet-console', 'desktop'), props: { ...pane('starfleet-console', 'desktop').props, bodyColumns: 30 } }
   const ui = await $.ui.mount(narrow)
   // A long prompt waits for its summary: no extra 'Summarizing' line comes and goes
@@ -1334,13 +1334,13 @@ test('only a test or build command counts as diagnostics', async () => {
 test('a crew member keeps its sprite for good; only newcomers avoid a neighbor\'s shirt color', async ($, on) => {
   const store = engine(on)
   // Both wear yellow and stand side by side: neither is switched
-  store.crewAssign = { '/Users/cap/MOD': 'data', '/Users/cap/old/app': 'geordi' }
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  store.crewAssign = { '/Users/cap/workshop': 'data', '/Users/cap/old/app': 'geordi' }
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const run = $.command.run as (input: { command: string; args: string }) => Promise<unknown>
   await run({ command: 'crew', args: '' })
   expect((store.crew as { sprite: string }[]).map(c => c.sprite)).toEqual(['data', 'geordi'])
   // A newcomer next to a yellow shirt picks another color
-  store.crewAssign = { '/Users/cap/MOD': 'data' }
+  store.crewAssign = { '/Users/cap/workshop': 'data' }
   await run({ command: 'crew', args: '' })
   const shirt: Record<string, string> = { picard: 'r', riker: 'r', data: 'y', geordi: 'y', worf: 'y', seven: 'g', troi: 'p', crusher: 't' }
   const crew = store.crew as { sprite: string }[]
@@ -1352,7 +1352,7 @@ test('a deck another chat posts moves that project on every console', async ($, 
   // The mock file system decodes that project folder as /Users/cap/old/app
   const post = JSON.stringify({ path: '/Users/cap/old/app', deck: 'engineering', at: Date.now() })
   engine(on, undefined, { name: '-Users-cap-old-app.json', text: post })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'terminal', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'terminal', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   // Nine days idle would put it in quarters; the live post puts it in engineering
   expect(await deckOn($, 'app')).toBe('engineering')
@@ -1363,7 +1363,7 @@ test('each captain gets their own hub: the first sync publishes it, then syncs g
   on('audio.play', () => ({ value: undefined }))
   const sent: string[] = []
   on('prompt.submit', (_: unknown, e: { text: string }) => { sent.push(e.text); return { text: e.text } })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const run = $.command.run as (input: { command: string; args: string }) => Promise<{ text?: string }>
 
   // No hub yet: the closure report publishes one from the bundled template first, and names no one else's hub
@@ -1403,7 +1403,7 @@ test('each captain gets their own hub: the first sync publishes it, then syncs g
 
 test('an old session gives its log to the archive, and its other keys are cleared', async ($, on) => {
   const store = engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const run = $.command.run as (input: { command: string; args: string }) => Promise<unknown>
   await run({ command: 'log', args: 'note from the first session' })
   store['lastPrompt:sess-1'] = { text: 'x'.repeat(100), at: 1 }
@@ -1432,7 +1432,7 @@ test('make it so approves only the proposed step, in words the captain can see',
   const suggested: string[] = []
   on('prompt.suggest', (_: unknown, e: { text: string }) => { suggested.push(e.text); return { isShown: true } })
   on('turn.complete', () => ({ text: '' }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
 
   await ($.prompt.submit as (e: { text: string }) => Promise<unknown>)({ text: 'Make it so!' })
   const order = sent.at(-1)!
@@ -1455,7 +1455,7 @@ test('with AI summaries off, nothing is sent to a model for titles or briefings'
   const asked: string[] = []
   on('model.complete', (_: unknown, e: { prompt: string }) => { asked.push(e.prompt); return { value: { isAnswered: true, text: 'Fix the crash', usage: { input_tokens: 1, output_tokens: 1 } } as never } })
   on('prompt.submit', (_: unknown, e: { text: string }) => ({ text: e.text }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const run = $.command.run as (input: { command: string; args: string }) => Promise<{ text?: string }>
   expect((await run({ command: 'ai-summaries', args: '' })).text).toContain('AI summaries on')
   expect((await run({ command: 'ai-summaries', args: 'off' })).text).toContain('AI summaries off')
@@ -1479,7 +1479,7 @@ test('eject asks for a handoff that replaces the last one and drops nothing', as
   on('clock.after', () => ({ value: undefined }))
   const sent: string[] = []
   on('prompt.submit', (_: unknown, e: { text: string }) => { sent.push(e.text); return { text: e.text } })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   // The first press arms the core; the second ejects it
   const core = await $.ui.mount(pane('starfleet-core', 'desktop'))
   await core.press({ key: 'eject' })
@@ -1501,7 +1501,7 @@ test('from 70% the core asks once per tier whether the work is mid-task, and rec
   on('audio.play', () => ({ value: undefined }))
   on('session.measure', () => ({ changed: [] }))
   on('session.compact', () => ({ skip: 'not in a test' }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const measure = $.session.measure as unknown as (input: object) => Promise<unknown>
   const context = (percent: number) => ({ context: { tokens: percent * 2000, window: 200000, percent } })
 
@@ -1535,7 +1535,7 @@ test('from 70% the core asks once per tier whether the work is mid-task, and rec
 test('an answered mid-task question stays answered after a reload', async ($, on) => {
   const store = engine(on)
   store['coreAlert:sess-1'] = { tier: 2, isMemoryAlertRaised: false, advice: { tier: 2, answer: 'done' } }
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const ui = await $.ui.mount(band('terminal', false))
   expect(await ui.find({ type: 'Text', text: /Still mid-task/ })).toBeFalsy()
   expect(await ui.find({ type: 'Button', key: 'band-eject' })).toBeTruthy()
@@ -1545,7 +1545,7 @@ test('an answered mid-task question stays answered after a reload', async ($, on
 test('dilithium shows the window Claude Code reports, not one worked out from a rounded percent', async ($, on) => {
   engine(on)
   on('session.measure', () => ({ changed: [] }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const measure = $.session.measure as unknown as (input: object) => Promise<unknown>
   // 150.5k of a 1M window rounds to 15%, which would read as 1003k
   await measure({ context: { tokens: 150500, window: 1000000, percent: 15 } })
@@ -1556,7 +1556,7 @@ test('dilithium shows the window Claude Code reports, not one worked out from a 
 
 test('the captain\'s log is gold and the crew decks grey, and the readout labels are bold', async ($, on) => {
   engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
   expect((await ui.find({ type: 'Box', key: 'b-log' }))?.props.borderColor).toBe('#ffcc33')
   expect((await ui.find({ type: 'Box', key: 'box-crew' }))?.props.borderColor).toBe('#8c8a96')
@@ -1577,7 +1577,7 @@ test('the captain\'s log is gold and the crew decks grey, and the readout labels
 
 test('the log field lives in its own tab, so typing never gives the console the keys', async ($, on) => {
   const store = engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   // No field in the console at any width: a focused field there makes the pane shiver on scroll
   for (const bodyColumns of [24, 50, 120]) {
     const p = pane('starfleet-console', 'desktop')
@@ -1629,8 +1629,8 @@ test('the cast hands out every square first, then the picture tags, with Riker l
 
 test('the default planet is drawn in the project\'s crew color; a picked planet keeps its own', () => {
   const troi = SPRITE_COLORS.troi!
-  expect(viewscreenSvg('MOD', 'none', undefined, troi)).toContain(troi)
-  expect(viewscreenSvg('MOD', 'none', 'classm', troi)).not.toContain(troi)
+  expect(viewscreenSvg('workshop', 'none', undefined, troi)).toContain(troi)
+  expect(viewscreenSvg('workshop', 'none', 'classm', troi)).not.toContain(troi)
 })
 
 test('an ale tag, or the heart Guinan had before it, is swapped like any other crew tag', () => {
@@ -1642,7 +1642,7 @@ test('after /clear the new chat gets its own warp core question and an empty log
   const store = engine(on)
   on('session.measure', () => ({ changed: [] }))
   store['logDraft:sess-1'] = 'old chat draft'
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   let ui = await $.ui.mount(band('desktop', false))
   await ui.press({ key: 'band-done' })
   await ui.unmount()
@@ -1665,7 +1665,7 @@ test('after /clear the new chat gets its own warp core question and an empty log
 test('once a compact drops the load, climbing back past 70% asks again', async ($, on) => {
   engine(on)
   on('session.measure', () => ({ changed: [] }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const measure = $.session.measure as unknown as (input: object) => Promise<unknown>
   const context = (percent: number) => ({ context: { tokens: percent * 2000, window: 200000, percent } })
   let ui = await $.ui.mount(band('desktop', false))
@@ -1680,7 +1680,7 @@ test('once a compact drops the load, climbing back past 70% asks again', async (
 
 test('condition Borg is orange, never the all-clear green', async ($, on) => {
   engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
   const badge = await ui.find({ type: 'Text', text: /^ CONDITION BORG $/ })
   expect(badge?.props.backgroundColor).toBe('#ff9966')
@@ -1688,10 +1688,10 @@ test('condition Borg is orange, never the all-clear green', async ($, on) => {
 })
 
 test('a worktree chat counts as its project\'s crew member, so the planet takes the crew color', async ($, on) => {
-  const store = engine(on, undefined, undefined, { cwd: '/Users/cap/MOD/.claude/worktrees/fix-1' })
-  await $.session.start({ cwd: '/Users/cap/MOD/.claude/worktrees/fix-1', surface: 'desktop', isInteractive: true })
+  const store = engine(on, undefined, undefined, { cwd: '/Users/cap/workshop/.claude/worktrees/fix-1' })
+  await $.session.start({ cwd: '/Users/cap/workshop/.claude/worktrees/fix-1', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
-  const mod = (store.crew as { path: string; sprite: string }[]).find(c => c.path === '/Users/cap/MOD')!
+  const mod = (store.crew as { path: string; sprite: string }[]).find(c => c.path === '/Users/cap/workshop')!
   const ui = await $.ui.mount(pane('starfleet-console', 'desktop'))
   const screen = (await ui.findAll({ type: 'Svg' })).find(s => String(s.props.alt ?? '').startsWith('Viewscreen'))
   expect(String(screen?.props.source)).toContain(SPRITE_COLORS[mod.sprite]!)
@@ -1703,14 +1703,14 @@ test('the hub keeps no crew roster: Rescan touches nothing there, and each missi
   const sent: string[] = []
   on('prompt.submit', (_: unknown, e: { text: string }) => { sent.push(e.text); return { text: e.text } })
   store.hubUrl = 'https://claude.ai/artifact/hub1'
-  // This chat's mission, in its MOD project
-  store['missions:sess-1'] = [{ id: 'sess-1', stardate: '1028.26', at: Date.now(), project: 'MOD', cwd: '/Users/cap/MOD', turns: 3, redAlerts: 0, handoffs: 0 }]
+  // This chat's mission, in its workshop project
+  store['missions:sess-1'] = [{ id: 'sess-1', stardate: '1028.26', at: Date.now(), project: 'workshop', cwd: '/Users/cap/workshop', turns: 3, redAlerts: 0, handoffs: 0 }]
   const hub: unknown[] = []
   on('tool.call', (_: unknown, e: { tool: string }) => {
     if (e.tool === 'ArtifactData') hub.push(e)
     return { result: 'ok', text: 'committed' }
   })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const ui = await $.ui.mount(pane('starfleet-crew', 'desktop'))
   expect((await ui.find({ type: 'Button', key: 'rescan' }))?.props.label).toBe('Rescan crew')
   await ui.press({ key: 'rescan' })
@@ -1720,13 +1720,13 @@ test('the hub keeps no crew roster: Rescan touches nothing there, and each missi
   expect(sent).toEqual([])
   // The sync no longer writes a crew collection, and every mission names its crew member
   const records = JSON.parse((await callTool($, { tool: 'mcp__starfleet__starfleet_records' }) as { result: string }).result) as { missions: { sprite?: string; tag?: string; crewName?: string }[] }
-  const mod = (store.crew as { path: string; sprite: string }[]).find(c => c.path === '/Users/cap/MOD')!
+  const mod = (store.crew as { path: string; sprite: string }[]).find(c => c.path === '/Users/cap/workshop')!
   expect(records.missions[0]).toMatchObject({ sprite: mod.sprite, tag: SPRITES[mod.sprite]!.emoji, crewName: SPRITES[mod.sprite]!.name })
 })
 
 test('a hotkey does the same thing in every pane, and no label repeats its key in brackets', async ($, on) => {
   engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await ($.command.run as (input: { command: string; args: string }) => Promise<unknown>)({ command: 'crew', args: '' })
   const byKey = new Map<string, Set<string>>()
   for (const id of ALL_PANES) {
@@ -1754,7 +1754,7 @@ test('another mod holding /ai-summaries or /hub never stops /starfleet from regi
     registered.push(e.name)
     return { value: { command: e.name } }
   } })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   for (const name of ['starfleet', 'log', 'crew', 'warp-core', 'bridge']) expect(registered).toContain(name)
 })
 
@@ -1765,19 +1765,19 @@ test('a newer Starfleet on GitHub gets one toast a day that says how to update, 
   const fetched: string[] = []
   on('fs.read', (_: unknown, e: { path: string }) => ({ value: e.path.endsWith('plugin.json') ? '{"version":"0.4.14"}' : '' }))
   on('http.fetch', (_: unknown, e: { url: string }) => { fetched.push(e.url); return { value: { status: 200, ok: true, headers: {}, text: `{"version":"${remote}"}` } } })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await new Promise(done => setTimeout(done, 20))
   expect(fetched).toEqual(['https://raw.githubusercontent.com/lorlola07/starfleet/main/.claude-plugin/plugin.json'])
   expect(toasts.some(t => t.includes('0.4.20 is out') && t.includes('/plugin update starfleet'))).toBe(true)
   // Checked today already: no second request
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await new Promise(done => setTimeout(done, 20))
   expect(fetched.length).toBe(1)
   // A day on, the same version as installed: a request but no toast
   store.updateCheckedAt = 0
   remote = '0.4.14'
   const before = toasts.length
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await new Promise(done => setTimeout(done, 20))
   expect(fetched.length).toBe(2)
   expect(toasts.slice(before).some(t => t.includes('is out'))).toBe(false)
@@ -1786,7 +1786,7 @@ test('a newer Starfleet on GitHub gets one toast a day that says how to update, 
 
 test('About gives every part its name in the heading color', async ($, on) => {
   engine(on)
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const ui = await $.ui.mount(pane('starfleet-about', 'desktop'))
   for (const name of ['Viewscreen', 'Shields', 'Starfleet Command hub']) {
     const t = (await ui.findAll({ type: 'Text' })).find(x => x.text === name && (x.props as { bold?: boolean }).bold)
@@ -1827,7 +1827,7 @@ test('the project map files a folder under a project, in the records, the briefi
 })
 
 test('a folder not on the project map is its own project', () => {
-  expect(projectFor({ mod: 'Starfleet mod' }, 'MOD')).toBe('Starfleet mod')
-  expect(projectFor({ mod: 'Starfleet mod' }, 'Side Work')).toBe('Side Work')
-  expect(projectFor({ mod: 'Starfleet mod' }, 'Starfleet mod')).toBe('Starfleet mod')
+  expect(projectFor({ workshop: 'Project A' }, 'workshop')).toBe('Project A')
+  expect(projectFor({ workshop: 'Project A' }, 'Side Project')).toBe('Side Project')
+  expect(projectFor({ workshop: 'Project A' }, 'Project A')).toBe('Project A')
 })

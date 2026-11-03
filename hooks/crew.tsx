@@ -52,7 +52,7 @@ const WALK_MS = 1800
 
 // ~/.claude/projects names a project's path with every / and . turned into -; rebuild it.
 // A dash may also be a real one (my-space), so try each split and back up on a dead end.
-// Spaces, underscores and other marks became dashes too ("Side Work"): when the dashed name
+// Spaces, underscores and other marks became dashes too ("Side Project"): when the dashed name
 // is not there, look in the folder for an entry that encodes to it
 const encodeName = (name: string) => name.replace(/[^a-zA-Z0-9]/g, '-')
 // Folders already decoded, by their ~/.claude/projects name: one check that the folder is still

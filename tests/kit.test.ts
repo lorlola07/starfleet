@@ -28,7 +28,7 @@ function claudeCode(on: any, extra: { toasts?: string[]; prompts?: string[] } = 
   on('agent.register', () => ({ value: undefined }))
   on('session.start', ($: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 'kit-1' }))
-  on('session.cwd', () => ({ value: '/Users/cap/MOD' }))
+  on('session.cwd', () => ({ value: '/Users/cap/workshop' }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 20000, window: 200000, percent: 10 }, rateLimits: [] } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.status', () => ({ value: undefined }))
@@ -50,7 +50,7 @@ test('Eject core arms for six seconds; a press after that only arms it again', a
   const toasts: string[] = []
   const prompts: string[] = []
   const clock = claudeCode(on, { toasts, prompts })
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   const core = await $.ui.mount(CORE)
 
   // The first press arms the core and says how long the window is
@@ -78,7 +78,7 @@ test('a refused model call leaves the last order titled from the prompt itself',
   claudeCode(on)
   // The title model can't be reached: the call rejects in the mod, as { deny } makes it
   on('model.complete', () => ({ deny: 'no model in this test' }))
-  await $.session.start({ cwd: '/Users/cap/MOD', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: '/Users/cap/workshop', surface: 'desktop', isInteractive: true })
   await $.prompt.submit({ text: 'Please look into why the warp core crashes on startup when the config file is missing' } as never)
 
   const ui = await $.ui.mount(CONSOLE)
