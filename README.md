@@ -87,3 +87,31 @@ From a shell:
 ```bash
 claude plugin install starfleet --marketplace lorlola07/starfleet
 ```
+
+## Updating
+
+Installed copies don't update on their own. Pushing a new version to GitHub doesn't change a copy that's already installed.
+
+Version 0.4.14 and newer checks once a day and shows a notice when a new version is out. Older copies don't have that notice, so if your console looks out of date, update by hand.
+
+In a Claude Code message box:
+
+```
+/plugin update starfleet
+```
+
+Then run `/reload-plugins`, or start a new chat.
+
+From a shell, refresh the marketplace, then update:
+
+```bash
+claude plugin marketplace update starfleet
+```
+
+```bash
+claude plugin update starfleet@starfleet
+```
+
+To see which version you have, run `claude plugin list`.
+
+Your hub page is your own copy, so updating Starfleet doesn't change it. To get a new hub version, ask Claude to republish your hub from `assets/hub.html`.
