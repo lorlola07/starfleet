@@ -94,6 +94,8 @@ Installed copies don't update on their own. Pushing a new version to GitHub does
 
 Version 0.4.14 and newer checks once a day and shows a notice when a new version is out. Older copies don't have that notice, so if your console looks out of date, update by hand.
 
+**In the Claude desktop app:** go to Customize → Plugins, open Starfleet under Yours and press **Update**, then start a new chat. A new install can show an old version at first, so check the version number after you install.
+
 In a Claude Code message box:
 
 ```
