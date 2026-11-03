@@ -1,11 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.4.16
 
 ### Changed
 - **The hub opens closed:** every reload starts with the notebook's projects and folders folded, no note open, and every mission report closed. Things still open and close as you click while you're on the page.
 - **Edit report:** a project report's Edit report button, in its top bar, edits the whole report in one form: the overview, what each chapter delivered, what's still open and the next step. Chapter lists are saved back to their chapters.
 - **Project reports add up their chapters:** a project report now shows the warp core totals, models, plugins, skills, connectors, away teams, stations, moments and files changed across all its chapters, each listed once.
+- **Getting these on your hub:** your hub page is your own copy, so it doesn't change when you update Starfleet. Ask Claude to republish it from `assets/hub.html`.
 
 ## 0.4.15
 
